@@ -389,7 +389,8 @@ async function openFiles(files, editorPanel, showTab) {
     if (rest.length) await importFiles(rest, editorPanel, showTab);
     return;
   }
-  const text = await toml.text();
+  // LF, as the editor (a textarea) holds it, so an opened file is not "unsaved" at once.
+  const text = (await toml.text()).replace(/\r\n?/g, "\n");
   let parsed;
   try {
     parsed = parseProject(text);

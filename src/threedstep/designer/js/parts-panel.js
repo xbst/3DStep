@@ -65,6 +65,8 @@ export class PartsPanel {
   _bind() {
     const st = this.state;
     for (const ev of ["project-changed", "models-changed", "step-changed", "models-measured", "dirty-changed"]) st.on(ev, () => this.render());
+    // A notice reports what the last action did; history moves make it stale.
+    st.on("undo-changed", () => { if (st.origin === "undo") this.notice = ""; });
     st.on("selection-changed", () => this._paintSelection());
     this.search.addEventListener("input", () => {
       this.filter = this.search.value.trim().toLowerCase();

@@ -52,7 +52,7 @@ export class InspectorPanel {
     const st = this.state;
     const key = m.kind === "arrow" ? `arrow:${st.currentStep}:${m.index}:${m.item.kind}`
       : m.kind === "label" ? `label:${st.currentStep}:${m.index}`
-      : m.kind === "parts" ? `parts:${m.ids.join(",")}:${st.currentStep >= 0}`
+      : m.kind === "parts" ? `parts:${m.ids.join(",")}:${st.currentStep >= 0}:${m.ids.map((id) => (st.registry.groups.has(id) ? "g" : "p")).join("")}`
       : m.kind === "step" ? `step:${st.currentStep}` : m.kind;
     if (key !== this._key) {
       this._key = key;

@@ -982,7 +982,7 @@ html, body {
   border-radius: 4px;
   overflow: auto;
   scrollbar-gutter: stable;
-  background: #fff;
+  background: var(--bg);
 }
 .gen-preview iframe { width: 100%; height: 100%; border: 0; display: block; }
 .gen-error { margin: 0; padding: 12px; color: var(--danger); font-size: 12px; white-space: pre-wrap; background: var(--bg); min-height: 100%; }
@@ -1027,7 +1027,7 @@ html, body {
   .workspace { display: flex; flex-direction: column; }
   .panel-left { width: 100% !important; height: 340px; border-bottom: 1px solid var(--border); }
   .resizer-h { display: none; }
-  .panel-center { min-height: 0; height: 62vh; min-width: 0; }
+  .panel-center { flex: none; min-height: 300px; height: 62vh; min-width: 0; }
   .panel-inspector { width: 100% !important; max-height: none; min-width: 0; }
   .panel-inspector-body { overflow: visible; }
   .statusbar { flex-wrap: wrap; white-space: normal; }

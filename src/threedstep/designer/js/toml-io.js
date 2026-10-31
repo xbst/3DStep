@@ -816,11 +816,24 @@ function patchTable(ed, block, spec, data) {
   }
   const dotted = new Set(block.keys.filter(k => k.path.length > 1).map(k => k.key));
   const missing = spec.filter(f => !seen.has(f.key) && !dotted.has(f.key) && (f.required || !isDefault(f, data[f.key])));
-  if (missing.length) {
-    const ref = simple.length ? simple[simple.length - 1].line : block.header;
-    const indent = simple.length ? indentOf(ed.doc, ref) : (block.header >= 0 ? indentOf(ed.doc, block.header) : "");
-    ed.insertAfter(block.fieldsEnd, missing.map(f => `${indent}${f.key} = ${valueText(f.kind, data[f.key])}`));
+  if (!missing.length) return;
+  const ref = simple.length ? simple[simple.length - 1].line : block.header;
+  const indent = simple.length ? indentOf(ed.doc, ref) : (block.header >= 0 ? indentOf(ed.doc, block.header) : "");
+  // Each new key goes where the layout puts it: above the first existing key
+  // that the layout writes after it, else after the last key.
+  const order = new Map(spec.map((f, i) => [f.key, i]));
+  const known = simple.filter(k => order.has(k.key));
+  const before = new Map();
+  const after = [];
+  for (const f of missing) {
+    const next = known.find(k => order.get(k.key) > order.get(f.key));
+    const line = `${indent}${f.key} = ${valueText(f.kind, data[f.key])}`;
+    if (!next) after.push(line);
+    else if (before.has(next.line)) before.get(next.line).push(line);
+    else before.set(next.line, [line]);
   }
+  for (const [line, lines] of before) ed.insertBefore(line, lines);
+  ed.insertAfter(block.fieldsEnd, after);
 }
 
 const normCamera = c => (c && typeof c === "object" ? {
