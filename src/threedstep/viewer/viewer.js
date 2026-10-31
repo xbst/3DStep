@@ -193,7 +193,7 @@
       return "\u0000" + (codes.length - 1) + "\u0000";
     });
     s = s.replace(/\*\*([^*\n]+?)\*\*/g, "<strong>$1</strong>");
-    s = s.replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, function (m, label, url) {
+    s = s.replace(/\[([^\]\n]+)\]\(((?:[^()\s]|\([^()\s]*\))+)\)/g, function (m, label, url) {
       if (!safeUrl(url)) return label;
       return '<a href="' + url + '" target="_blank" rel="noopener">' + label + "</a>";
     });
@@ -657,9 +657,9 @@
 
   function edgeKernel(width) {
     var w = clamp(Math.round(width), 1, 6);
-    var lo = -Math.floor((w - 1) / 2), hi = Math.ceil((w - 1) / 2);
+    var lo = 0 - Math.floor((w - 1) / 2), hi = Math.ceil((w - 1) / 2);
     var out = [];
-    for (var y = lo; y <= hi; y++) for (var x = lo; x <= hi; x++) out.push([x, y]);
+    for (var y = lo; y <= hi; y++) for (var x = lo; x <= hi; x++) out.push([x + 0, y + 0]);
     return out;
   }
 
@@ -1373,15 +1373,35 @@
 
     // ── Cameras ──────────────────────────────────────────────────────
     function aspect() {
-      var w = view.clientWidth || 1, h = view.clientHeight || 1;
+      // Before the first layout (a hidden tab, a display:none ancestor) the view
+      // has no size; the theme's aspect stands in so a fit camera is never
+      // computed for a degenerate viewport.
+      var w = view.clientWidth, h = view.clientHeight;
+      if (!(w >= 2) || !(h >= 2)) return clamp(num(behavior.viewportAspect, 1.6), 0.2, 5) || 1.6;
       return w / h;
     }
     function defaultDir() { return scene.up === "y" ? DEFAULT_DIR_Y.slice() : DEFAULT_DIR_Z.slice(); }
-    function boxOf(ids) {
+    // The box of some ids (every part when `ids` is empty) in their displayed
+    // poses for a step: a part the step moves counts where it is shown, so a
+    // fit over an exploded step frames the explosion.
+    function boxOf(ids, placed) {
       var b = new THREE.Box3();
-      (ids || []).forEach(function (id) {
-        if (parts[id]) b.union(parts[id].box);
-        else if (groupBox[id]) b.union(groupBox[id]);
+      var list = ids && ids.length ? ids : partList.map(function (p) { return p.id; });
+      list.forEach(function (id) {
+        var members = registry && registry.members[id] ? registry.members[id] : [id];
+        members.forEach(function (pid) {
+          var part = parts[pid];
+          if (!part) return;
+          var p = placed && placed[pid];
+          if (p && (p.offset[0] || p.offset[1] || p.offset[2] || p.rotate[0] || p.rotate[1] || p.rotate[2])) {
+            var q = quatFromRotate(p.rotate), c = pivotCenterFor(part, p);
+            var rc = c.clone().applyQuaternion(q);
+            var m = new THREE.Matrix4().compose(new THREE.Vector3(p.offset[0] + c.x - rc.x, p.offset[1] + c.y - rc.y, p.offset[2] + c.z - rc.z), q, new THREE.Vector3(1, 1, 1));
+            b.union(part.box.clone().applyMatrix4(m));
+          } else {
+            b.union(part.box);
+          }
+        });
       });
       if (b.isEmpty()) b.copy(modelBox);
       return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] };
@@ -1394,11 +1414,12 @@
       for (var k = 0; k <= i; k++) {
         var spec = states[k] ? states[k].camera : null;
         var cam;
+        var placed = states[k] ? states[k].placed : null;
         if (camCache[k]) { cam = camCache[k]; }
         else if (!spec || spec.kind === "auto") {
-          cam = fitCamera(boxOf(null), prevDir, spec ? spec.fov : 35, spec ? spec.projection : "orthographic", aspect());
+          cam = fitCamera(boxOf(null, placed), prevDir, spec ? spec.fov : 35, spec ? spec.projection : "orthographic", aspect());
         } else if (spec.kind === "fit") {
-          cam = fitCamera(boxOf(spec.fit), prevDir, spec.fov, spec.projection, aspect());
+          cam = fitCamera(boxOf(spec.fit, placed), prevDir, spec.fov, spec.projection, aspect());
         } else {
           cam = { position: spec.position.slice(), target: spec.target.slice(), fov: spec.fov, projection: spec.projection };
         }
@@ -1414,7 +1435,7 @@
       if (home && isVec3(home.position) && isVec3(home.target)) {
         return { position: vec3(home.position), target: vec3(home.target), fov: num(home.fov, 35), projection: home.projection === "perspective" ? "perspective" : "orthographic" };
       }
-      return fitCamera(boxOf(null), defaultDir(), 35, "orthographic", aspect());
+      return fitCamera(boxOf(null, null), defaultDir(), 35, "orthographic", aspect());
     }
 
     // Apply a camera spec {position, target, fov, projection} instantly.
@@ -1768,14 +1789,13 @@
       var sweep = 2 * Math.PI * Math.abs(turns) * (turns < 0 ? -1 : 1);
       var radius = Math.max(a.radius, 1e-3);
       var g = new THREE.Group();
-      var Arc = function () { THREE.Curve.call(this); };
-      Arc.prototype = Object.create(THREE.Curve.prototype);
-      Arc.prototype.constructor = Arc;
-      Arc.prototype.getPoint = function (t, target) {
-        var th = sweep * t;
-        var p = target || new THREE.Vector3();
-        return p.copy(center).addScaledVector(u, radius * Math.cos(th)).addScaledVector(v, radius * Math.sin(th));
-      };
+      class Arc extends THREE.Curve {
+        getPoint(t, target) {
+          var th = sweep * t;
+          var p = target || new THREE.Vector3();
+          return p.copy(center).addScaledVector(u, radius * Math.cos(th)).addScaledVector(v, radius * Math.sin(th));
+        }
+      }
       var curve = new Arc();
       var segs = Math.max(12, Math.round(48 * Math.abs(turns)));
       var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, segs, s.shaftRadius, 10, false), arrowMaterial(a.color));
@@ -2020,9 +2040,13 @@
       container.classList.remove("is-played");
       animatePanel(function () { renderPanelStep(i); });
       if (modelsLoaded || !webgl) {
-        applyState(i, animate, function () {
-          if (behavior.autoplay && !editor && changed && states[i] && Object.keys(states[i].placed).length) playMoves(true, true);
-        });
+        try {
+          applyState(i, animate, function () {
+            if (behavior.autoplay && !editor && changed && states[i] && Object.keys(states[i].placed).length) playMoves(true, true);
+          });
+        } catch (e) {
+          fail(e);
+        }
       }
       if (handle.onStep) { try { handle.onStep(i, states[i]); } catch (e) { /* ignore */ } }
       requestRender();
@@ -2067,7 +2091,8 @@
     on(canvas, "pointerleave", function (e) { activation.pointerLeave(e.pointerType); });
     on(canvas, "pointerenter", function () { activation.pointerEnter(); });
     on(doc, "pointerdown", function (e) {
-      if (!container.contains(e.target)) activation.pointerDown(false, e.pointerType);
+      // the designer keeps its viewport active whatever panel is clicked
+      if (!editor && !container.contains(e.target)) activation.pointerDown(false, e.pointerType);
     }, { capture: true, passive: true });
     on(container, "keydown", function (e) {
       if (e.defaultPrevented) return;
@@ -2078,7 +2103,7 @@
         case "ArrowLeft": case "PageUp": goToStep(current - 1, {}); break;
         case "Home": goToStep(0, {}); break;
         case "End": goToStep(states.length - 1, {}); break;
-        case "Escape": activation.escape(); break;
+        case "Escape": if (editor) return; activation.escape(); break;
         case "+": case "=": dolly(1 / 1.25); break;
         case "-": case "_": dolly(1.25); break;
         default: return;
@@ -2150,7 +2175,10 @@
 
     // ── Fullscreen (PinConnect's new-tab fallback) ───────────────────
     function fsElement() { return doc.fullscreenElement || doc.webkitFullscreenElement || null; }
-    function fsAvailable() { return !!(doc.fullscreenEnabled || doc.webkitFullscreenEnabled) && !!(container.requestFullscreen || container.webkitRequestFullscreen); }
+    function fsAvailable() {
+      var enabled = "fullscreenEnabled" in doc ? !!doc.fullscreenEnabled : !!doc.webkitFullscreenEnabled;
+      return enabled && !!(container.requestFullscreen || container.webkitRequestFullscreen);
+    }
     function openFull() {
       try {
         var u = new URL(standaloneUrl, win.location.href);
@@ -2322,7 +2350,7 @@
       opts = opts || {};
       var cam = getCamera();
       var dir = vnorm(vsub(cam.position, cam.target));
-      var next = fitCamera(boxOf(ids && ids.length ? ids : null), dir, cam.fov, cam.projection, aspect());
+      var next = fitCamera(boxOf(ids && ids.length ? ids : null, states[current] ? states[current].placed : null), dir, cam.fov, cam.projection, aspect());
       flyTo(next, opts.animate === false ? 0 : behavior.transitionMs / 2, null);
     }
     function screenshot(type) {
@@ -2384,7 +2412,11 @@
       dispose: dispose,
       parts: function () { return partList.map(function (p) { return p.id; }); },
       tree: function () { return registry; },
-      _debug: { setFullscreenClass: setFullscreenClass, tokens: function () { return tokens; }, parts: function () { return parts; }, scene3: function () { return scene3; } }
+      _debug: {
+        setFullscreenClass: setFullscreenClass, tokens: function () { return tokens; }, parts: function () { return parts; },
+        scene3: function () { return scene3; }, resolveCamera: resolveCamera, isVisible: function () { return visible; },
+        controls: function () { return controls; }, behavior: behavior
+      }
     });
 
     // ── Boot sequence ────────────────────────────────────────────────
@@ -2484,7 +2516,9 @@
       }
     }
     var params = parseParams(window.location.search);
-    var viewer = createViewer(root, {
+    // options.viewer: extra createViewer options (callbacks, editor flags) for
+    // pages that boot the generated-page way but want the handle's hooks.
+    var viewer = createViewer(root, Object.assign({
       scene: scene,
       models: models,
       controls: params.controls || undefined,
@@ -2494,7 +2528,7 @@
       onReady: options.onReady,
       onError: options.onError,
       standaloneUrl: window.location.href
-    });
+    }, options.viewer || {}));
     var isFs = function () { return !!(document.fullscreenElement || document.webkitFullscreenElement); };
     var reporter = startHeightReporter(root, isFs);
     window.addEventListener("message", function (e) {
@@ -2523,6 +2557,7 @@
       edgeKernel: edgeKernel,
       createActivation: createActivation,
       createHeightReporter: createHeightReporter,
+      startHeightReporter: startHeightReporter,
       readBehavior: readBehavior,
       base64ToArrayBuffer: base64ToArrayBuffer,
       STR: STR
