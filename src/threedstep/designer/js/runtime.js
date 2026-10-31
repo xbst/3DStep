@@ -11,6 +11,7 @@ const PYODIDE_BASE = `https://cdn.jsdelivr.net/pyodide/${PYODIDE_VERSION}/full/`
 const PAYLOAD_URL = "threedstep.zip";
 const ROOT_DIR = "/threedstep";
 const PKG_DIR = `${ROOT_DIR}/pkg`;
+const BOOT_TIMEOUT_MS = 180000;
 
 let _boot = null;
 let _bridge = null;
@@ -46,7 +47,18 @@ async function boot() {
   }
   let py;
   try {
-    py = await loadPyodide({ indexURL: PYODIDE_BASE });
+    // loadPyodide does not always reject when one of its own downloads fails
+    // (it can wait forever), so give it a deadline rather than leave the
+    // status on "Starting renderer…".
+    let timer;
+    const deadline = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error("it did not finish loading within 3 minutes")), BOOT_TIMEOUT_MS);
+    });
+    try {
+      py = await Promise.race([loadPyodide({ indexURL: PYODIDE_BASE }), deadline]);
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (e) {
     throw new Error(
       "The Python runtime from cdn.jsdelivr.net did not start" +
