@@ -617,27 +617,43 @@ export class ProjectState {
   // the moves they are in and get a move of their own, starting from where
   // the first of them sits now.
   setMove(ids, fields, origin = "visual") {
+    return this.setMoves([{ ids, ...fields }], origin);
+  }
+
+  // Several placements in one undo step (a gizmo drag over a selection, an
+  // exploded step): entries of {ids, offset, rotate, arrow}, each applied as
+  // setMove applies one. Entries are applied in order, so an entry may take
+  // parts out of a move an earlier entry made.
+  setMoves(entries, origin = "visual") {
     if (!this._prepareMutation(origin)) return false;
     const c = this.currentStep;
-    ids = this.topIds(ids);
-    if (c < 0 || !ids.length) return false;
+    if (c < 0 || !entries.length) return false;
     const next = this.project.clone();
     const step = next.steps[c];
-    const clean = {};
-    if (fields.offset) clean.offset = fields.offset.map(v => round(v, 4));
-    if (fields.rotate) clean.rotate = fields.rotate.map(v => round(v, 4));
-    if ("arrow" in fields) clean.arrow = fields.arrow !== false;
-    const exact = step.moves.find(m => sameSet(m.parts, ids));
-    let removed = [];
-    if (exact) {
-      Object.assign(exact, clean);
-    } else {
+    const placements = this.placements(c);
+    const removed = [];
+    let any = false;
+    for (const entry of entries) {
+      // Ids no loaded model has get no move (the page could not place them).
+      const ids = this.topIds(entry.ids || []).filter(id => this.registry.members.has(id));
+      if (!ids.length) continue;
+      any = true;
+      const clean = {};
+      if (entry.offset) clean.offset = entry.offset.map(v => round(v, 4));
+      if (entry.rotate) clean.rotate = entry.rotate.map(v => round(v, 4));
+      if ("arrow" in entry && entry.arrow !== undefined) clean.arrow = entry.arrow !== false;
+      const exact = step.moves.find(m => sameSet(m.parts, ids));
+      if (exact) {
+        Object.assign(exact, clean);
+        continue;
+      }
       const first = expandIds(this.registry, ids)[0] || ids[0];
-      const now = this.placements(c).get(first) || { offset: [0, 0, 0], rotate: [0, 0, 0], arrow: true };
-      removed = this._withoutInMoves(step, new Set(expandIds(this.registry, ids)), ids);
+      const now = placements.get(first) || { offset: [0, 0, 0], rotate: [0, 0, 0], arrow: true };
+      for (const index of this._withoutInMoves(step, new Set(expandIds(this.registry, ids)), ids)) removed.push({ step: c, list: "moves", index });
       step.moves.push(new Move({ parts: ids, offset: now.offset, rotate: now.rotate, arrow: now.arrow, ...clean }));
     }
-    return this._commit(origin, next, { kind: "steps", indices: [c], removed: removed.map(index => ({ step: c, list: "moves", index })) });
+    if (!any) return false;
+    return this._commit(origin, next, { kind: "steps", indices: [c], removed });
   }
 
   // Back to the assembled pose in the current step.
