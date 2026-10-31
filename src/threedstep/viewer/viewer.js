@@ -1,7 +1,7 @@
 /* 3DStep viewer runtime.
  *
- * One classic script, inlined into every generated page and loaded with
- * <script src> by the designer. It defines window.ThreeDStep (SPEC 9.11):
+ * One classic script, inlined into every generated page and loaded by its own
+ * script element in the designer. It defines window.ThreeDStep (SPEC 9.11):
  *
  *   ThreeDStep.boot(options)         what a generated page calls: finds #tds,
  *                                    #tds-scene and the #tds-model-* elements,
