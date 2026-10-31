@@ -1,0 +1,56 @@
+[project]
+name = "3dstep"
+version = "0.1.0"
+description = "Step-by-step interactive 3D assembly instructions for documentation sites, with a visual designer"
+requires-python = ">=3.9"
+dependencies = [
+    "tomli>=2.0; python_version < '3.11'",
+]
+readme = "README.md"
+license = "GPL-3.0"
+license-files = ["LICENSE"]
+
+# STEP to GLB conversion on a machine (`3dstep model.step`), for CI pipelines
+# that keep only the STEP in the repository. The OCP wheels exist for Python
+# 3.11 and later only, so on 3.9 and 3.10 the extra installs nothing and the
+# convert mode reports the dependency as missing.
+[project.optional-dependencies]
+step = [
+    "cadquery-ocp-novtk>=8.0,<9; python_version >= '3.11'",
+]
+
+[project.urls]
+Homepage = "https://github.com/xbst/3DStep"
+Designer = "https://3dstep.isiks.tech"
+Documentation = "https://doctools.isiks.tech/3dstep/"
+
+[project.scripts]
+3dstep = "threedstep.cli:main"
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["threedstep"]
+
+[tool.setuptools.package-data]
+# Listed by file type rather than with a recursive glob: older setuptools
+# releases do not expand `**`, and naming the types keeps the generated payload
+# zip and any bytecode caches out of the wheel.
+threedstep = [
+    "themes/*.toml",
+    "viewer/*.js",
+    "viewer/*.css",
+    "viewer/vendor/*.js",
+    "viewer/vendor/*.txt",
+    "designer/*.html",
+    "designer/css/*.css",
+    "designer/js/*.js",
+    "designer/js/import/*.js",
+    "designer/py/*.py",
+    "designer/vendor/*.js",
+    "designer/vendor/*.wasm",
+    "designer/vendor/*.txt",
+]
