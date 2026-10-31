@@ -1,0 +1,59 @@
+# "Midnight" — an indigo accent with Inter, and the panel always below.
+#
+# An indigo-tinted palette, Inter for the UI and a monospaced label font for
+# callouts and the step counter.  The step panel sits under the 3D view at
+# every width, which suits pages with a narrow content column.  Copy and
+# tweak to taste.
+
+[theme]
+name = "Midnight"
+
+[font]
+family = "Inter"
+source = "google"
+weights = "400;500;600"
+
+[font.label]
+family = "JetBrains Mono"
+source = "google"
+weights = "400;500"
+
+[behavior]
+panel_placement = "below"
+
+[colors.light]
+bg             = "#f6f6fb"
+text           = "#1a1a2e"
+tip-border     = "#d9d9e8"
+tip-shadow     = "rgba(40,40,90,.14)"
+divider        = "#e7e7f1"
+desc-color     = "#55556e"
+accent         = "#4f46e5"
+view-bg        = "#fbfbfe"
+part-edge      = "#2a2a44"
+highlight-fill = "#c7d2fe"
+highlight-edge = "#4338ca"
+arrow          = "#4f46e5"
+arrow-edge     = "#312e81"
+label-text     = "#1a1a2e"
+label-line     = "#5a5a78"
+
+[colors.dark]
+bg             = "#0e0e1a"
+text           = "#e6e6f2"
+tip-bg         = "#17172a"
+tip-border     = "#2c2c47"
+tip-shadow     = "rgba(0,0,0,.5)"
+divider        = "#2a2a45"
+desc-color     = "#aaaac8"
+accent         = "#818cf8"
+view-bg        = "#12121f"
+part-fill      = "#1d1d33"
+part-edge      = "#c7c7e6"
+highlight-fill = "#312e81"
+highlight-edge = "#a5b4fc"
+arrow          = "#818cf8"
+arrow-edge     = "#e0e7ff"
+label-bg       = "rgba(23,23,42,.94)"
+label-text     = "#e6e6f2"
+label-line     = "#9a9ac0"

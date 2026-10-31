@@ -1,0 +1,98 @@
+# ─────────────────────────────────────────────────────────────────────
+# 3DStep theme — "default"
+#
+# This is the built-in default.  It sets only a name: every color falls
+# back to 3DStep's built-in palette (defined in threedstep/config.py),
+# so a project with no `theme` renders exactly like this.
+#
+# To make your own theme, copy this file to `<name>.toml` (in the bundled
+# themes folder, or a project-local `theme_dir`) and uncomment/override
+# the tokens you want to change.  A theme only needs to state what differs.
+# ─────────────────────────────────────────────────────────────────────
+
+[theme]
+name = "Default"
+
+# Fonts.  `source` is "google" (loaded from Google Fonts), "bundled" (a font
+# file embedded in the output as base64, so it stays self-contained), or
+# "system" (family is used verbatim as a CSS stack).  Omit [font] to use Roboto.
+#
+# [font]
+# family  = "Inter"
+# source  = "google"
+# weights = "400;500;600"        # google only
+# file    = "inter.woff2"        # bundled only, path relative to this file
+#
+# [font.label]                   # optional font for callout labels and the step counter; defaults to [font]
+# family  = "JetBrains Mono"
+# source  = "google"
+# weights = "400;500"
+
+# Behavior of the viewer chrome.  Omit [behavior] to keep the defaults.
+#
+# [behavior]
+# panel_placement        = "right"   # "right": beside the view, below it when narrow; "below": always below; "overlay": floats over the view
+# panel_stack_breakpoint = 760       # px width at/under which "right" stacks the panel below the view
+# panel_max_width        = 360       # max panel width in px (also capped at 40vw)
+# step_list              = true      # list every step in the panel
+# show_title             = true      # assembly title and description at the top of the panel
+# show_parts             = true      # list the highlighted parts under the step title
+# viewport_aspect        = 1.6       # width / height of the 3D area
+# viewport_min_height    = 320       # px
+# viewport_max_height    = 720       # px
+# font_scale             = 1.0       # scales the panel, HUD and label text
+# controls               = "full"    # "full", "minimal" (no panel) or "none" (view only); ?controls= overrides
+# edge_width             = 1.0       # line-art edge width in device pixels
+# edge_angle             = 35        # degrees; creases sharper than this get an edge
+# arrow_scale            = 1.0       # multiplies arrow sizes
+# transition_ms          = 600       # step transition and camera flight; 0 snaps
+# play_ms                = 900       # duration of Play
+# autoplay               = false     # play each step's moves after the transition
+# hint_autohide          = 4         # seconds before the hint pill shrinks to the credit; 0 keeps it
+# fullscreen_button      = true      # fullscreen button in the HUD (opens a new tab where fullscreen is unavailable)
+# style_toggle           = false     # HUD button to switch line art / shaded
+# projection_toggle      = false     # HUD button to switch orthographic / perspective
+
+# Colors are CSS values (hex, rgb(), rgba(), …).  `light` applies in light
+# mode, `dark` in dark mode; the host page's toggle and the OS scheme both
+# switch between them.  Token names are the generated CSS variables without
+# the leading `--`.
+#
+# [colors.light]
+# bg             = "#ffffff"              # page background
+# text           = "#1a1a1a"              # primary text
+# tip-bg         = "#ffffff"              # panel, HUD and label box background
+# tip-border     = "#d0d0d0"
+# tip-shadow     = "rgba(0,0,0,.12)"
+# hint-bg        = "rgba(30,30,30,.75)"   # hint pill
+# hint-text      = "#fff"
+# divider        = "#e5e5e5"
+# desc-color     = "#555"                 # secondary text (description, step counter)
+# scroll-thumb   = "rgba(0,0,0,.22)"
+# scroll-track   = "transparent"
+# accent         = "#2563eb"              # buttons, current step, progress, active-viewer outline
+# view-bg        = "#ffffff"              # the 3D area's background ("transparent" shows the host page)
+# part-fill      = "#ffffff"              # part faces (line art)
+# part-edge      = "#3a3a3a"              # edges (line art)
+# highlight-fill = "#b8cff5"              # faces of the parts installed in this step
+# highlight-edge = "#2f5fb3"
+# arrow          = "#2563eb"
+# arrow-edge     = "#1e3a8a"
+# label-bg       = "rgba(255,255,255,.92)"
+# label-text     = "#1a1a1a"
+# label-line     = "#3a3a3a"
+# ghost-opacity  = "0.25"                 # opacity of ghosted parts
+#
+# [colors.dark]
+# bg             = "#131313"
+# text           = "#e0e0e0"
+# ...  (same token names as light; see the docs for the dark defaults)
+
+# Raw CSS escape hatch, appended after the generated variable blocks, for
+# anything the tokens above can't express.  It is emitted verbatim and is a
+# trusted, author-controlled surface — keep project data out of it.
+#
+# [extra_css]
+# css = """
+# .tds-note { font-style: italic; }
+# """

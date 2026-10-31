@@ -1,0 +1,46 @@
+# "Slate" — cool gray parts with blue-gray edges and the Glegoo typeface.
+#
+# A quiet, technical look: the 3D area sits on a pale slate background, the
+# parts are filled a cool gray instead of white, and their edges are drawn in
+# blue-gray rather than near black.  Copy and tweak to taste.
+
+[theme]
+name = "Slate"
+
+[font]
+family = "Glegoo"
+source = "google"
+weights = "400;700"
+
+[colors.light]
+bg             = "#f8fafc"
+text           = "#0f172a"
+tip-border     = "#e2e8f0"
+tip-shadow     = "rgba(15,23,42,.10)"
+divider        = "#e2e8f0"
+desc-color     = "#475569"
+view-bg        = "#f1f5f9"
+part-fill      = "#e8edf3"
+part-edge      = "#475569"
+highlight-fill = "#bfdbfe"
+highlight-edge = "#1d4ed8"
+label-bg       = "rgba(248,250,252,.94)"
+label-text     = "#0f172a"
+label-line     = "#64748b"
+
+[colors.dark]
+bg             = "#0b1220"
+text           = "#e2e8f0"
+tip-bg         = "#131c2e"
+tip-border     = "#243044"
+tip-shadow     = "rgba(0,0,0,.5)"
+divider        = "#243044"
+desc-color     = "#9fb0c7"
+view-bg        = "#0f1729"
+part-fill      = "#1c2739"
+part-edge      = "#8ea3bd"
+highlight-fill = "#1e3a6e"
+highlight-edge = "#93c5fd"
+label-bg       = "rgba(19,28,46,.94)"
+label-text     = "#e2e8f0"
+label-line     = "#8ea3bd"

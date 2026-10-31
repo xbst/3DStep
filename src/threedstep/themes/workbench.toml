@@ -1,0 +1,60 @@
+# "Workbench" — warm neutrals with an amber accent, and the panel over the view.
+#
+# Inter for the UI.  The step text and the Previous / Next buttons float over
+# the bottom of the 3D view instead of sitting beside it (no step list), each
+# step plays its moves as soon as it is shown, and the HUD has a button to
+# switch between line art and shaded.  Copy and tweak to taste.
+
+[theme]
+name = "Workbench"
+
+[font]
+family = "Inter"
+source = "google"
+weights = "400;500;600"
+
+[behavior]
+panel_placement = "overlay"   # text and navigation float over the view
+autoplay = true               # play each step's moves after the transition
+style_toggle = true           # HUD button: line art / shaded
+
+[colors.light]
+bg             = "#f5f2ec"
+text           = "#25231f"
+tip-bg         = "#fffdf9"
+tip-border     = "#dbd4c6"
+tip-shadow     = "rgba(70,55,30,.12)"
+hint-bg        = "rgba(37,35,31,.78)"
+divider        = "#e6dfd2"
+desc-color     = "#5f584c"
+accent         = "#d97706"
+view-bg        = "#faf7f1"
+part-fill      = "#fffdf9"
+part-edge      = "#4a443a"
+highlight-fill = "#fde3b5"
+highlight-edge = "#b45309"
+arrow          = "#d97706"
+arrow-edge     = "#7c4a0b"
+label-bg       = "rgba(255,253,249,.94)"
+label-text     = "#25231f"
+label-line     = "#5c564b"
+
+[colors.dark]
+bg             = "#1a1814"
+text           = "#ebe5d9"
+tip-bg         = "#23201b"
+tip-border     = "#3b362d"
+tip-shadow     = "rgba(0,0,0,.5)"
+divider        = "#37322a"
+desc-color     = "#b4ab9c"
+accent         = "#fbbf24"
+view-bg        = "#1f1c17"
+part-fill      = "#2b2721"
+part-edge      = "#d6cdbd"
+highlight-fill = "#5a3d10"
+highlight-edge = "#fcd34d"
+arrow          = "#f0a83c"
+arrow-edge     = "#fde3b5"
+label-bg       = "rgba(35,32,27,.94)"
+label-text     = "#ebe5d9"
+label-line     = "#b5ac9c"
