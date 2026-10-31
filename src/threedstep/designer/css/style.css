@@ -747,6 +747,92 @@ html, body {
   pointer-events: none;
 }
 
+/* ── Viewport tools (chunk 05) ───────────────────────────────────── */
+
+/* The explode group's axis buttons and distance field. The group is the
+   widest: in a narrow viewport it wraps inside instead of being clipped. */
+.vp-group[data-group="explode"] { flex-wrap: wrap; max-width: 100%; }
+.vp-btn.vp-axis { padding: 0 5px; min-width: 30px; justify-content: center; font-family: var(--mono-font); font-size: 11px; }
+.vp-field {
+  width: 48px;
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+  font-family: var(--mono-font);
+  font-size: 11px;
+  text-align: right;
+  outline: none;
+}
+.vp-field:focus { border-color: var(--border-focus); }
+.vp-field:disabled { opacity: 0.4; }
+.vp-unit { padding: 0 6px 0 3px; color: var(--text-dim); font-size: 11px; }
+
+/* What the active tool asks for, and the value readout beside the pointer. */
+.vp-prompt {
+  position: absolute;
+  left: 50%;
+  bottom: 52px;
+  z-index: 6;
+  transform: translateX(-50%);
+  max-width: calc(100% - 24px);
+  padding: 5px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+  background: rgba(26, 26, 26, 0.94);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.vp-readout {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 7;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: rgba(26, 26, 26, 0.94);
+  color: var(--text);
+  font-family: var(--mono-font);
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.viewport.is-dragging { cursor: grabbing; }
+.viewport.is-dragging .vp-viewer canvas { cursor: grabbing; }
+
+/* The axis triad: bottom right, above the viewer's HUD. */
+.vp-triad {
+  position: absolute;
+  right: 10px;
+  bottom: 54px;
+  z-index: 3;
+  width: 96px;
+  height: 96px;
+  cursor: pointer;
+  opacity: 0.9;
+}
+.vp-triad:hover { opacity: 1; }
+
+/* Labels are selectable in the editor (the viewer tags them); the selected
+   label and the selected arrow's tail label get the accent frame. */
+.vp-viewer.tds .tds-label[data-tds-label], .vp-viewer.tds .tds-label[data-tds-arrow] { pointer-events: auto; cursor: pointer; }
+.vp-viewer.tds .tds-label.is-selected { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Inspector rows for moves, arrows and labels: a checkbox and a remove button per row. */
+.item-row .check.mini { flex: none; font-size: 11px; color: var(--text-dim); gap: 3px; }
+.item-row .row-x { flex: none; border: 0; background: none; color: var(--text-dim); font-size: 14px; line-height: 1; padding: 0 4px; cursor: pointer; }
+.item-row .row-x:hover { color: var(--danger); }
+.item-row .row-tool { flex: none; border: 0; background: none; color: var(--text-dim); font-size: 11px; padding: 0 4px; cursor: pointer; }
+.item-row .row-tool:hover { color: var(--accent-hover); }
+
 /* ── Code editor (textarea + highlight overlay) ──────────────────── */
 
 .code-editor {

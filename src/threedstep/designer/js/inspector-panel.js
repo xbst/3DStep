@@ -11,9 +11,12 @@
 
 import { ARROW_KINDS, LABEL_SIDES, expandIds, membersOf } from "./project-model.js";
 import { esc } from "./dialogs.js";
+import { convertAttached, roundTo } from "./tools/geometry.js";
+import { attachPlacement } from "./tools/placement.js";
 
 const fmt = (v) => (Number.isFinite(v) ? String(Number(v.toFixed(4))) : "");
 const AXES = ["x", "y", "z"];
+const round3 = (p) => p.map((v) => roundTo(v, 3));
 
 function vecInputs(id, title) {
   return `<span class="vec" role="group" aria-label="${esc(title)}">` + AXES.map((a, k) =>
@@ -27,6 +30,9 @@ export class InspectorPanel {
     this.state = state;
     this.viewport = viewport;
     this._key = null;
+    // The part an arrow or label was attached to, kept while it is detached,
+    // so the "Attached" box can turn it back on: "step:kind:index" -> id.
+    this._lastAttach = new Map();
     for (const ev of ["project-changed", "selection-changed", "step-changed", "models-changed"]) state.on(ev, () => this.render());
     container.addEventListener("change", (e) => this._onChange(e));
     container.addEventListener("input", (e) => this._onInput(e));
@@ -120,6 +126,7 @@ export class InspectorPanel {
       `<div class="insp-row"><span class="insp-label">Camera</span><span class="insp-value insp-note" id="insp-cam-state"></span></div>` +
       `<div class="insp-buttons"><button class="small-btn" data-act="cam-use" title="Use the current view as this step's camera">Use view</button>` +
       `<button class="small-btn" data-act="cam-fit" title="Frame the parts this step highlights, from the previous step's direction">Fit highlighted</button>` +
+      `<button class="small-btn pick-btn" data-act="cam-pick-fit" title="Click parts in the viewport to add them to (or take them out of) the fit list; Escape finishes">Pick fit…</button>` +
       `<button class="small-btn" data-act="cam-clear" title="Inherit the previous step's camera again">Clear</button></div>` +
       `<div class="insp-section">What this step changes</div>` +
       chipRow("show", "Shows") + chipRow("hide", "Hides") + chipRow("highlight", "Highlights") + chipRow("ghost", "Ghosts") +
@@ -153,6 +160,7 @@ export class InspectorPanel {
     this.container.querySelector('[data-act="cam-clear"]').disabled = !step.camera;
     this.container.querySelector('[data-act="cam-use"]').disabled = !st.loadedModels().length;
     this.container.querySelector('[data-act="cam-fit"]').disabled = !step.highlight.length;
+    this.container.querySelector('[data-act="cam-pick-fit"]').disabled = !st.loadedModels().length || !(this.viewport && this.viewport.canPickPoints);
     for (const key of ["show", "hide", "highlight", "ghost"]) {
       const box = this.container.querySelector(`#insp-chips-${key}`);
       box.innerHTML = step[key].length ? step[key].map((id) => {
@@ -164,13 +172,16 @@ export class InspectorPanel {
     const moves = this.container.querySelector("#insp-moves");
     moves.innerHTML = step.moves.length ? step.moves.map((m, j) =>
       `<div class="item-row" data-move="${j}" title="Select these parts"><span>${esc(m.parts.join(", "))}</span>` +
-      `<span class="insp-sub">${m.offset.some((v) => v) ? `[${m.offset.map(fmt).join(", ")}]` : ""}${m.rotate.some((v) => v) ? ` ⟳[${m.rotate.map(fmt).join(", ")}]` : ""}</span></div>`).join("")
+      `<span class="insp-sub">${m.offset.some((v) => v) ? `[${m.offset.map(fmt).join(", ")}]` : ""}${m.rotate.some((v) => v) ? ` ⟳[${m.rotate.map(fmt).join(", ")}]` : ""}</span>` +
+      `<label class="check mini" title="Auto arrow from the moved to the assembled pose"><input type="checkbox" data-move-arrow="${j}"${m.arrow ? " checked" : ""}> arrow</label>` +
+      `<button class="row-x" data-move-clear="${j}" aria-label="Assemble ${esc(m.parts.join(", "))}" title="Back to the assembled pose (removes this move)">×</button></div>`).join("")
       : `<span class="chips-empty">Select parts and give them an offset to explode them in this step.</span>`;
     const arrows = this.container.querySelector("#insp-arrows");
-    arrows.innerHTML = step.arrows.map((a, j) => `<div class="item-row" data-arrow="${j}"><span>${a.kind === "rotate" ? "⟳" : "➝"} ${esc(a.label || `Arrow ${j + 1}`)}</span>` +
-      `<span class="insp-sub">${esc(a.attach)}</span></div>`).join("") || `<span class="chips-empty">none</span>`;
+    arrows.innerHTML = step.arrows.map((a, j) => `<div class="item-row${st.selection.arrow === j ? " selected" : ""}" data-arrow="${j}" title="Select this arrow"><span>${a.kind === "rotate" ? "⟳" : "➝"} ${esc(a.label || `Arrow ${j + 1}`)}</span>` +
+      `<span class="insp-sub">${esc(a.attach)}</span><button class="row-x" data-arrow-del="${j}" aria-label="Delete arrow ${j + 1}" title="Delete this arrow">×</button></div>`).join("") || `<span class="chips-empty">none</span>`;
     const labels = this.container.querySelector("#insp-labels");
-    labels.innerHTML = step.labels.map((l, j) => `<div class="item-row" data-label="${j}"><span>${esc(l.text)}</span><span class="insp-sub">${esc(l.attach)}</span></div>`).join("")
+    labels.innerHTML = step.labels.map((l, j) => `<div class="item-row${st.selection.label === j ? " selected" : ""}" data-label="${j}" title="Select this label"><span>${esc(l.text)}</span><span class="insp-sub">${esc(l.attach)}</span>` +
+      `<button class="row-x" data-label-del="${j}" aria-label="Delete label ${j + 1}" title="Delete this label">×</button></div>`).join("")
       || `<span class="chips-empty">none</span>`;
   }
 
@@ -214,7 +225,9 @@ export class InspectorPanel {
         `<div class="insp-row"><span class="insp-label">Rotate °</span>${vecInputs("insp-rotate", "Rotate")}</div>` +
         `<div class="insp-row"><span class="insp-label"></span><label class="check"><input type="checkbox" id="insp-arrow"> Auto arrow to the assembled pose</label></div>` +
         `<p class="insp-note" id="insp-move-note"></p>` +
-        `<div class="insp-buttons"><button class="small-btn" data-act="fit-sel">Fit view</button>` +
+        `<div class="insp-buttons"><button class="small-btn" data-act="tool-move" title="Drag the selection in the viewport (G)">Move</button>` +
+        `<button class="small-btn" data-act="tool-rotate" title="Turn the selection about its center in the viewport (R)">Rotate</button>` +
+        `<button class="small-btn" data-act="fit-sel">Fit view</button>` +
         `<button class="small-btn" data-act="isolate">Isolate</button>` +
         `<button class="small-btn" data-act="remove-from-step" title="Take the selection out of this step's lists and moves (Delete)">Remove from step</button></div>`;
     }
@@ -299,6 +312,7 @@ export class InspectorPanel {
       `<div class="insp-row"><label for="insp-acolor">Color</label><input id="insp-acolor" class="field-input" placeholder="the theme's arrow color" autocomplete="off" spellcheck="false"></div>` +
       `<div class="insp-row"><label for="insp-alabel">Label</label><input id="insp-alabel" class="field-input" placeholder="Optional text at the tail" autocomplete="off"></div>` +
       `<div class="insp-row"><label for="insp-aattach">Attach</label><input id="insp-aattach" class="field-input" list="insp-ids" placeholder="Optional part id: follows its move" autocomplete="off" spellcheck="false"></div>` +
+      `<div class="insp-row"><span class="insp-label"></span><label class="check" title="The points are in the part's frame, so the arrow travels with the part during Play; off: model space"><input type="checkbox" id="insp-aattached"> <span id="insp-aattached-text">Attached</span></label></div>` +
       `<div class="insp-buttons"><button class="small-btn danger" data-act="remove-arrow">Delete arrow</button></div>` +
       `</div>`;
   }
@@ -313,6 +327,21 @@ export class InspectorPanel {
     this._set("insp-acolor", a.color);
     this._set("insp-alabel", a.label);
     this._set("insp-aattach", a.attach);
+    this._fillAttached("arrow", m.index, a.attach, "insp-aattached");
+  }
+
+  // The "Attached" box of an arrow or label: on while attach names a part;
+  // off remembers the part so it can be turned back on.
+  _fillAttached(kind, index, attach, id) {
+    const key = `${this.state.currentStep}:${kind}:${index}`;
+    if (attach) this._lastAttach.set(key, attach);
+    const remembered = this._lastAttach.get(key) || "";
+    const el = this.container.querySelector(`#${id}`);
+    if (!el) return;
+    el.checked = !!attach;
+    el.disabled = !attach && !remembered;
+    const text = this.container.querySelector(`#${id}-text`);
+    if (text) text.textContent = attach ? `Attached to ${attach}: follows its move` : remembered ? `Attach to ${remembered} again` : "Attached (type a part id above)";
   }
 
   // ── Label ──────────────────────────────────────────────────────────
@@ -327,6 +356,7 @@ export class InspectorPanel {
       `<div class="insp-row"><label for="insp-side">Side</label><select id="insp-side" class="field-select">` +
       LABEL_SIDES.map((s) => `<option value="${s}">${s === "auto" ? "Auto (away from the center)" : s[0].toUpperCase() + s.slice(1)}</option>`).join("") + `</select></div>` +
       `<div class="insp-row"><label for="insp-lattach">Attach</label><input id="insp-lattach" class="field-input" list="insp-ids" placeholder="Optional part id: follows its move" autocomplete="off" spellcheck="false"></div>` +
+      `<div class="insp-row"><span class="insp-label"></span><label class="check" title="The anchor is in the part's frame, so the label travels with the part during Play; off: model space"><input type="checkbox" id="insp-lattached"> <span id="insp-lattached-text">Attached</span></label></div>` +
       `<div class="insp-buttons"><button class="small-btn danger" data-act="remove-label">Delete label</button></div>` +
       `</div>`;
   }
@@ -337,6 +367,33 @@ export class InspectorPanel {
     this._setVec("insp-at", l.at);
     this._set("insp-side", l.side);
     this._set("insp-lattach", l.attach);
+    this._fillAttached("label", m.index, l.attach, "insp-lattached");
+  }
+
+  // Change what an arrow or label is attached to, converting its points so
+  // it stays where it is shown (geometry.convertAttached): one undo step.
+  _reattach(m, attach) {
+    const st = this.state;
+    const item = m.item;
+    if (attach === item.attach) return true;
+    const from = attachPlacement(st, item.attach);
+    const to = attachPlacement(st, attach);
+    if (m.kind === "arrow") {
+      const [a, b] = convertAttached([item.from, item.to], from, to).map(round3);
+      return st.updateArrow(m.index, { attach, from: a, to: b });
+    }
+    const [at] = convertAttached([item.at], from, to).map(round3);
+    return st.updateLabel(m.index, { attach, at });
+  }
+
+  _toggleAttached(m, on) {
+    const key = `${this.state.currentStep}:${m.kind}:${m.index}`;
+    if (!on) {
+      if (m.item.attach) this._lastAttach.set(key, m.item.attach);
+      return this._reattach(m, "");
+    }
+    const id = this._lastAttach.get(key);
+    return id ? this._reattach(m, id) : false;
   }
 
   // ── Edits ──────────────────────────────────────────────────────────
@@ -351,7 +408,10 @@ export class InspectorPanel {
     const m = this._mode();
     const i = st.currentStep;
     let ok = true;
-    if (t.dataset.vec) {
+    if (t.dataset.moveArrow !== undefined) {
+      const move = st.step() && st.step().moves[Number(t.dataset.moveArrow)];
+      ok = move ? st.setMove(move.parts, { arrow: t.checked }) : false;
+    } else if (t.dataset.vec) {
       const v = this._readVec(t.dataset.vec);
       if (!v) { this.render(); return; }
       const vid = t.dataset.vec;
@@ -377,10 +437,12 @@ export class InspectorPanel {
         case "insp-radius": ok = Number(t.value) > 0 ? st.updateArrow(m.index, { radius: Number(t.value) }) : false; break;
         case "insp-acolor": ok = st.updateArrow(m.index, { color: t.value.trim() }); break;
         case "insp-alabel": ok = st.updateArrow(m.index, { label: t.value.trim() }); break;
-        case "insp-aattach": ok = st.updateArrow(m.index, { attach: t.value.trim() }); break;
+        case "insp-aattach": ok = this._reattach(m, t.value.trim()); break;
+        case "insp-aattached": ok = this._toggleAttached(m, t.checked); break;
         case "insp-ltext": ok = t.value.trim() ? st.updateLabel(m.index, { text: t.value.trim() }) : false; break;
         case "insp-side": ok = st.updateLabel(m.index, { side: t.value }); break;
-        case "insp-lattach": ok = st.updateLabel(m.index, { attach: t.value.trim() }); break;
+        case "insp-lattach": ok = this._reattach(m, t.value.trim()); break;
+        case "insp-lattached": ok = this._toggleAttached(m, t.checked); break;
         default: return;
       }
     }
@@ -404,10 +466,15 @@ export class InspectorPanel {
 
   _onClick(e) {
     const st = this.state;
+    // A checkbox inside a row is its own control, not a click on the row.
+    if (e.target.closest("input, label.check")) return;
     const t = e.target.closest("button, [data-select], [data-move], [data-arrow], [data-label]");
     if (!t) return;
     const m = this._mode();
     if (t.dataset.unlist) { st.removeListedId(t.dataset.unlist, t.dataset.id); return; }
+    if (t.dataset.moveClear !== undefined) { const mv = st.step().moves[Number(t.dataset.moveClear)]; if (mv) st.clearMove(mv.parts); return; }
+    if (t.dataset.arrowDel !== undefined) { st.removeArrow(Number(t.dataset.arrowDel)); return; }
+    if (t.dataset.labelDel !== undefined) { st.removeLabel(Number(t.dataset.labelDel)); return; }
     if (t.dataset.select !== undefined && t.tagName !== "BUTTON") { st.selectParts([t.dataset.select], "replace"); return; }
     if (t.dataset.move !== undefined) { st.selectParts(st.step().moves[Number(t.dataset.move)].parts, "replace"); return; }
     if (t.dataset.arrow !== undefined) { st.setSelection({ arrow: Number(t.dataset.arrow) }); return; }
@@ -415,10 +482,21 @@ export class InspectorPanel {
     if (t.dataset.pick) {
       if (!this.viewport || !this.viewport.canPickPoints) return;
       const field = t.dataset.pick;
+      const index = m.index, kind = m.kind;
       this.viewport.pickPoint({ prompt: `Click the ${field === "at" ? "anchor" : field} point` }).then((hit) => {
         if (!hit) return;
-        if (field === "at") st.updateLabel(m.index, { at: hit.point });
-        else st.updateArrow(m.index, { [field]: hit.point });
+        // The pick is in model space; the item's points are in its attached part's frame.
+        const step = st.step();
+        const item = step && (kind === "label" ? step.labels[index] : step.arrows[index]);
+        if (!item) return;
+        const [p] = convertAttached([hit.point], null, attachPlacement(st, item.attach)).map(round3);
+        if (field === "at") st.updateLabel(index, { at: p });
+        else {
+          // The other end of the arrow is not a point to pick: the arrow would have no direction.
+          const other = item[field === "from" ? "to" : "from"];
+          if (other.every((v, k) => Math.abs(v - p[k]) < 1e-6)) return;
+          st.updateArrow(index, { [field]: p });
+        }
       }, () => {});
       return;
     }
@@ -427,6 +505,24 @@ export class InspectorPanel {
       case "cam-use": this.viewport.useCurrentView(); break;
       case "cam-clear": this.viewport.clearStepCamera(); break;
       case "cam-fit": st.setStepCamera(st.currentStep, { fit: st.step().highlight.slice() }); break;
+      case "cam-pick-fit": {
+        const index = st.currentStep;
+        this.viewport.pickParts({
+          prompt: "Click parts to add to the fit list (again to take one out)",
+          onPick: (id) => {
+            const step = st.step(index);
+            if (!step) return;
+            const fit = step.camera && step.camera.fit ? step.camera.fit.slice() : [];
+            const k = fit.indexOf(id);
+            if (k >= 0) fit.splice(k, 1); else fit.push(id);
+            if (fit.length) st.setStepCamera(index, { fit }, "viewport");
+            else st.setStepCamera(index, null, "viewport");
+          },
+        });
+        break;
+      }
+      case "tool-move": this.viewport.setTool("move"); break;
+      case "tool-rotate": this.viewport.setTool("rotate"); break;
       case "add-arrow": {
         // Above the selection (or the model), pointing down the up axis: a
         // start for the numbers or the viewport's arrow tool.

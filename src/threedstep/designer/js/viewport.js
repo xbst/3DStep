@@ -1,10 +1,17 @@
 // The viewport: the viewer runtime (viewer/viewer.js, window.ThreeDStep) in
 // editor mode, fed the scene the project makes and the GLB bytes of the
-// loaded models, with an overlay toolbar. First version (chunk 04): selection
-// by clicking, the step camera (use the current view, clear), fit, play, the
-// style and projection toggles and the preview scheme. The viewport tools
-// (chunk 05: gizmos, explode, arrows and labels by clicking) plug in through
-// registerTool() and the toolbar groups; see the Tools section below.
+// loaded models, with an overlay toolbar. Chunk 04 wrote the coordinator:
+// selection by clicking, the step camera (use the current view, clear), fit,
+// play, the style and projection toggles and the preview scheme. The tools
+// (chunk 05) live in tools/: the Move and Rotate gizmos (gizmo.js), the
+// explode helpers (explode.js), the Arrow, Rotate arrow and Label tools with
+// the pick modes behind the inspector's buttons (annotate.js), and the camera
+// helpers with the axis triad (camera.js). They plug in through
+// registerTool(), addButton() and the toolbar groups; see the Tools section.
+//
+// Keys (main.js hands them to keyDown when no field has focus): G move,
+// R rotate, A arrow, Shift+A rotate arrow, L label, F fit the view, Escape
+// cancels the tool's action or returns to Select; Delete is main.js's.
 //
 // The viewer reads its colors from CSS variables on its root, so the theme's
 // tokens (bridge.theme_tokens) are set on the viewer element. The designer is
@@ -12,9 +19,16 @@
 // default, light on request), which is also what the viewer's own scheme
 // detection reads.
 
+import { GizmoTools } from "./tools/gizmo.js";
+import { ExplodeTools } from "./tools/explode.js";
+import { AnnotateTools } from "./tools/annotate.js";
+import { CameraTools } from "./tools/camera.js";
+
 const SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 export const ICONS = {
   select: `<svg ${SVG}><path d="M5 3l14 8-6 2-2 6z"/></svg>`,
+  move: `<svg ${SVG}><path d="M12 2v20M2 12h20"/><path d="M9 5l3-3 3 3M9 19l3 3 3-3M5 9l-3 3 3 3M19 9l3 3-3 3"/></svg>`,
+  rotate: `<svg ${SVG}><path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M20 3v5h-5"/><circle cx="12" cy="12" r="1.5"/></svg>`,
   fit: `<svg ${SVG}><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/><rect x="8" y="8" width="8" height="8" rx="1"/></svg>`,
   camera: `<svg ${SVG}><path d="M3 8h4l2-3h6l2 3h4v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg>`,
   clear: `<svg ${SVG}><path d="M6 6l12 12M18 6L6 18"/></svg>`,
@@ -44,7 +58,8 @@ export class Viewport {
     this._hadModels = false;
     this._camSig = "";
     this._loading = 0;
-    // Picking points for the inspector's "pick" buttons arrives with chunk 05.
+    // Set by the annotation tools, which implement pickPoint() for the
+    // inspector's "pick" buttons.
     this.canPickPoints = false;
     try { this.scheme = localStorage.getItem(SCHEME_KEY) === "light" ? "light" : "dark"; } catch (e) { this.scheme = "dark"; }
     document.documentElement.setAttribute("data-theme", this.scheme);
@@ -65,17 +80,41 @@ export class Viewport {
       `<button class="toolbar-btn" data-act="open">Open project</button></div>` +
       `</div>` +
       `<div class="vp-busy" id="vp-busy" hidden></div>` +
+      `<div class="vp-prompt" id="vp-prompt" role="status" hidden></div>` +
+      `<div class="vp-readout" id="vp-readout" aria-live="off" hidden></div>` +
       `<div class="vp-drop">Drop STEP, GLB or project files</div>`;
     this.viewerEl = el.querySelector("#vp-viewer");
     this.toolbar = el.querySelector("#vp-toolbar");
     this.emptyEl = el.querySelector("#vp-empty");
     this.busyEl = el.querySelector("#vp-busy");
+    this.promptEl = el.querySelector("#vp-prompt");
+    this.readoutEl = el.querySelector("#vp-readout");
     this.groups = {};
     for (const g of this.toolbar.querySelectorAll(".vp-group")) this.groups[g.dataset.group] = g;
 
     this._buildToolbar();
+    this._buildTools();
     this._bindState();
     this._create();
+  }
+
+  // The tools of chunk 05, in their toolbar groups. They read the viewer's
+  // editor hooks lazily (the viewer exists after _create, and is recreated on
+  // a theme change: they listen to "ready").
+  _buildTools() {
+    this.gizmo = new GizmoTools(this);
+    this.registerTool("move", this.gizmo.tool("translate"), { label: "Move", title: "Move the selection (G): drag the gizmo's arrows or planes; Shift snaps to 1 mm", icon: ICONS.move });
+    this.registerTool("rotate", this.gizmo.tool("rotate"), { label: "Rotate", title: "Rotate the selection about its center (R): drag the gizmo's rings; Shift snaps to 5°", icon: ICONS.rotate });
+    this.explode = new ExplodeTools(this);
+    this.annotate = new AnnotateTools(this);
+    this.cameraTools = new CameraTools(this);
+    // Labels (and arrows, by their tail label) are selected by clicking them.
+    this.viewerEl.addEventListener("click", (e) => {
+      const label = e.target.closest && e.target.closest(".tds-label");
+      if (!label) return;
+      if (label.dataset.tdsLabel !== undefined) this.state.setSelection({ label: Number(label.dataset.tdsLabel) });
+      else if (label.dataset.tdsArrow !== undefined) this.state.setSelection({ arrow: Number(label.dataset.tdsArrow) });
+    });
   }
 
   // ── Toolbar ────────────────────────────────────────────────────────
@@ -127,6 +166,8 @@ export class Viewport {
     this.btnStyle.classList.toggle("active", this.state.project.assembly.style === "shaded");
     this.btnProj.classList.toggle("active", this.getProjection() === "perspective");
     this.btnScheme.classList.toggle("active", this.scheme === "light");
+    for (const [name, tool] of this.tools) if (name !== "select" && tool.button) tool.button.disabled = !hasModels;
+    if (!hasModels && this.activeTool !== "select") this.setTool("select");
     let cam = "Camera: none";
     if (hasStep) {
       if (!step.camera) cam = this.state.currentStep === 0 ? (this.state.project.camera ? "Camera: home view" : "Camera: auto-fit") : "Camera: inherited";
@@ -178,6 +219,7 @@ export class Viewport {
         this._setBusy("");
         this._syncStep();
         v.setSelection(this.state.selection.parts);
+        if (v.editor) v.editor.setAnnotationSelection(this.state.selection);
         if (camera) v.setCamera(camera);
         this._camSig = this._cameraSignature();
         this._refreshToolbar();
@@ -259,7 +301,9 @@ export class Viewport {
       this._refreshToolbar();
     });
     st.on("selection-changed", ({ selection }) => {
-      if (this.viewer) this.viewer.setSelection(selection.parts);
+      if (!this.viewer) return;
+      this.viewer.setSelection(selection.parts);
+      if (this.viewer.editor) this.viewer.editor.setAnnotationSelection(selection);
     });
   }
 
@@ -304,6 +348,11 @@ export class Viewport {
     for (const fn of this._listeners.pick) if (fn(hit, event) === true) return;
     if (!hit) {
       if (!event.shiftKey) this.state.clearSelection();
+      return;
+    }
+    // An explicit arrow of the step (the viewer picks them in editor mode).
+    if (hit.arrow !== undefined && hit.arrow !== null) {
+      this.state.setSelection({ arrow: hit.arrow });
       return;
     }
     let id = hit.id;
@@ -460,9 +509,45 @@ export class Viewport {
     return this.state.clearSelection();
   }
 
+  // Keys while no field has focus: the active tool first, then the tool
+  // shortcuts (G, R, A, Shift+A, L) and F (fit the view). True when handled.
   keyDown(event) {
     const tool = this.tools.get(this.activeTool);
-    return !!(tool && tool.onKeyDown && tool.onKeyDown(event) === true);
+    if (tool && tool.onKeyDown && tool.onKeyDown(event) === true) return true;
+    if (event.ctrlKey || event.metaKey || event.altKey) return false;
+    const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+    const hasModels = this.state.loadedModels().length > 0;
+    if (key === "f" && !event.shiftKey) {
+      if (hasModels) this.fit();
+      return hasModels;
+    }
+    const name = key === "g" && !event.shiftKey ? "move"
+      : key === "r" && !event.shiftKey ? "rotate"
+      : key === "a" ? (event.shiftKey ? "rotate-arrow" : "arrow")
+      : key === "l" && !event.shiftKey ? "label" : null;
+    if (!name || !this.tools.has(name) || !hasModels) return false;
+    this.setTool(name);
+    return true;
+  }
+
+  // Text the active tool asks the user for (empty hides it).
+  setPrompt(text) {
+    this.promptEl.hidden = !text;
+    this.promptEl.textContent = text || "";
+  }
+
+  // A value readout beside the pointer (client coordinates) while dragging.
+  showReadout(text, clientX, clientY) {
+    const r = this.el.getBoundingClientRect();
+    this.readoutEl.hidden = false;
+    this.readoutEl.textContent = text;
+    const x = Math.min(Math.max(8, clientX - r.left + 18), r.width - 8 - this.readoutEl.offsetWidth);
+    const y = Math.min(Math.max(8, clientY - r.top + 18), r.height - 8 - this.readoutEl.offsetHeight);
+    this.readoutEl.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  }
+
+  hideReadout() {
+    this.readoutEl.hidden = true;
   }
 
   on(event, fn) {
@@ -478,9 +563,14 @@ export class Viewport {
   }
 
   // A point picked in the viewport for the inspector's "pick" buttons:
-  // resolves to a hit {id, point, normal} or null. Chunk 05 provides it and
-  // sets canPickPoints; until then the buttons stay disabled.
-  pickPoint() {
-    return Promise.reject(new Error("picking points arrives with the viewport tools"));
+  // resolves to a hit {id, point, normal} (model space) or null on Escape.
+  pickPoint(opts) {
+    if (!this.annotate) return Promise.reject(new Error("the viewport tools are not ready"));
+    return this.annotate.pickPoint(opts || {});
+  }
+
+  // Parts picked one by one until Escape: {prompt, onPick(id, hit), onDone}.
+  pickParts(opts) {
+    if (this.annotate) this.annotate.pickParts(opts || {});
   }
 }

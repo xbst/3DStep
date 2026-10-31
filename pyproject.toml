@@ -49,6 +49,7 @@ threedstep = [
     "designer/css/*.css",
     "designer/js/*.js",
     "designer/js/import/*.js",
+    "designer/js/tools/*.js",
     "designer/py/*.py",
     "designer/vendor/*.js",
     "designer/vendor/*.wasm",
