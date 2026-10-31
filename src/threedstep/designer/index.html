@@ -1,23 +1,92 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>3DStep designer</title>
-<style>
-:root{color-scheme:dark}
-html,body{margin:0;height:100%;background:#131313;color:#e0e0e0;font-family:system-ui,sans-serif}
-main{max-width:640px;margin:0 auto;padding:48px 16px}
-h1{font-size:1.5rem;font-weight:600}
-p{line-height:1.6;color:#aaa}
-a{color:#60a5fa}
-</style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3DStep Designer</title>
+<meta name="description" content="Build step-by-step interactive 3D assembly instructions from STEP files, in the browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;600&family=Roboto+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="viewer/viewer.css">
+<link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-<main>
-<h1>3DStep designer: chunk 04</h1>
-<p>This is a placeholder: the designer app is not built yet. The <code>3dstep</code> command already renders a project from the command line: <code>3dstep assembly.toml</code> writes <code>assembly.3dstep.html</code>.</p>
-<p>Documentation is coming at <a href="https://doctools.isiks.tech/3dstep/">doctools.isiks.tech/3dstep</a>.</p>
-</main>
+<div class="app">
+
+  <!-- Top toolbar -->
+  <header class="toolbar">
+    <span class="toolbar-title">3DStep Designer</span>
+    <button id="undo-btn" title="Undo (Ctrl+Z)" disabled>&#x21A9; Undo</button>
+    <button id="redo-btn" title="Redo (Ctrl+Y)" disabled>&#x21AA; Redo</button>
+    <span class="separator"></span>
+    <label title="Add STEP or GLB models to the project">
+      Import model
+      <input type="file" id="import-input" accept=".step,.stp,.glb,.gltf" multiple>
+    </label>
+    <label title="Open a project TOML with its GLB models">
+      Open project
+      <input type="file" id="open-input" accept=".toml,.glb" multiple>
+    </label>
+    <button id="save-btn" title="Save the project TOML and its models (Ctrl+S)">Save project</button>
+    <button id="generate-btn" class="primary" disabled>Generate</button>
+    <span class="separator"></span>
+    <label class="select-field">
+      Theme
+      <select id="theme-select" aria-label="Theme"></select>
+    </label>
+    <label class="select-field">
+      Style
+      <select id="style-select" aria-label="Render style">
+        <option value="lineart">Line art</option>
+        <option value="shaded">Shaded</option>
+      </select>
+    </label>
+    <span class="runtime-status" id="runtime-status"></span>
+    <button id="about-btn" class="icon-btn" title="About 3DStep" aria-label="About 3DStep">?</button>
+  </header>
+
+  <div class="banners" id="banners" aria-live="polite"></div>
+
+  <div class="workspace" id="workspace">
+
+    <!-- Left: parts, steps and the TOML source -->
+    <section class="panel-left" id="panel-left">
+      <div class="panel-tabs" role="tablist" aria-label="Project views">
+        <button id="tab-parts" class="panel-tab" role="tab" aria-selected="true" aria-controls="parts-tab-panel">Parts</button>
+        <button id="tab-steps" class="panel-tab" role="tab" aria-selected="false" aria-controls="steps-tab-panel" tabindex="-1">Steps</button>
+        <button id="tab-toml" class="panel-tab" role="tab" aria-selected="false" aria-controls="toml-tab-panel" tabindex="-1">TOML</button>
+      </div>
+      <div id="parts-tab-panel" class="panel-tab-content" role="tabpanel" aria-labelledby="tab-parts"></div>
+      <div id="steps-tab-panel" class="panel-tab-content" role="tabpanel" aria-labelledby="tab-steps" hidden></div>
+      <div id="toml-tab-panel" class="panel-tab-content" role="tabpanel" aria-labelledby="tab-toml" hidden>
+        <div class="panel-editor-body" id="editor-container"></div>
+      </div>
+    </section>
+
+    <div class="resizer-h" id="resizer-left" role="separator" aria-orientation="vertical"></div>
+
+    <!-- Center: the viewport -->
+    <section class="panel-center" id="panel-center">
+      <div class="viewport" id="viewport"></div>
+    </section>
+
+    <div class="resizer-h" id="resizer-right" role="separator" aria-orientation="vertical"></div>
+
+    <!-- Right: the inspector -->
+    <aside class="panel-inspector" id="panel-inspector">
+      <div class="panel-header" id="inspector-title">Inspector</div>
+      <div class="panel-inspector-body" id="inspector-body"></div>
+    </aside>
+
+  </div>
+
+  <footer class="statusbar" id="statusbar"></footer>
+
+</div>
+
+<script src="viewer/vendor/three.bundle.js"></script>
+<script src="viewer/viewer.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -328,7 +328,7 @@ export class ProjectState {
       this._redoStack = [];
       this._origin = "init";
       this.emit("models-changed", { origin });
-      this.emit("project-changed", { origin, change: { kind: "full" } });
+      this.emit("project-changed", { origin, change: { kind: "full", text: sourceText } });
       this.emit("step-changed", { index: this.currentStep, origin });
       this.emit("selection-changed", { selection: this.selection });
       this.emit("undo-changed", {});
@@ -336,7 +336,7 @@ export class ProjectState {
       this._origin = null;
       return true;
     }
-    return this._commit(origin, project, { kind: "full" }, { models: state, currentStep: project.steps.length ? 0 : -1, selection: emptySelection() });
+    return this._commit(origin, project, { kind: "full", text: sourceText }, { models: state, currentStep: project.steps.length ? 0 : -1, selection: emptySelection() });
   }
 
   // Add models opened beside a project (matched by file name), without an undo step of their own.
@@ -579,6 +579,23 @@ export class ProjectState {
     return this._commit(origin, next, { kind: "steps", indices: [c], removed: removed.map(index => ({ step: c, list: "moves", index })) });
   }
 
+  // Take one id out of one list of the current step (a chip's x): show and
+  // hide keep the later steps' displayed states, as every visibility edit does.
+  removeListedId(key, id, origin = "visual") {
+    if (!this._prepareMutation(origin)) return false;
+    const c = this.currentStep;
+    const step = this.step();
+    if (!step || !step[key] || !step[key].includes(id)) return false;
+    const next = this.project.clone();
+    const folds = this.folds();
+    next.steps[c][key] = next.steps[c][key].filter(x => x !== id);
+    if (key === "show" || key === "hide") {
+      const targets = foldVisibility(next.steps, next.assembly.start, this.registry).map((s, k) => (k <= c ? s : folds[k]));
+      this._applyLists(next, rewriteVisibility(next.steps, next.assembly.start, this.registry, targets, { from: c + 1 }));
+    }
+    return this._commit(origin, next, { kind: "steps", indices: [c] });
+  }
+
   // Take parts out of a step's moves; returns the indices of the moves that
   // were left empty and removed (highest first).
   _withoutInMoves(step, drop, ids = []) {
@@ -724,14 +741,17 @@ export class ProjectState {
   // A newly imported model (or an opened GLB, with its bytes): added to the
   // project under a file name no other model has. The first model names an
   // untitled project and gets it a first step.
-  addModel(model, { bytes = null, title = "", origin = "import" } = {}) {
+  addModel(model, { bytes = null, title = "", up = "", origin = "import" } = {}) {
     if (!this._prepareMutation(origin)) return null;
     const next = this.project.clone();
     const taken = [...next.assembly.models, ...this.models.keys()];
     const name = taken.includes(model.name) ? glbNameFor(model.name, taken) : model.name;
     const named = name === model.name ? model : { ...model, name };
+    const first = !this.loadedModels().length;
     next.assembly.models.push(name);
-    if (title && next.assembly.title === new Project().assembly.title && !this.loadedModels().length) next.assembly.title = title;
+    if (title && next.assembly.title === new Project().assembly.title && first) next.assembly.title = title;
+    // The first model's up axis is the project's.
+    if (first && (up === "y" || up === "z")) next.assembly.up = up;
     let current = this.currentStep;
     if (!next.steps.length) {
       next.steps.push(new Step());
