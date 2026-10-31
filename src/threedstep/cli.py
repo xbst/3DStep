@@ -8,6 +8,7 @@ usage errors rather than silently ignored.
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 
@@ -79,20 +80,27 @@ def _convert(args: argparse.Namespace) -> None:
         _error('STEP conversion needs the optional dependency: pip install "3dstep[step]"')
 
     step_path: Path = args.file.resolve()
-    if not step_path.exists():
+    if not step_path.is_file():
         _error(f"STEP file not found: {step_path}")
-    out_path: Path = args.output or step_path.with_suffix(".glb")
+    # The name the designer gives the same import, so a project it wrote finds
+    # the GLB this regenerates.
+    out_path: Path = args.output or step_path.with_name(stepconv.glb_name_for(step_path))
+    if out_path.resolve() == step_path:
+        _error(f"the output would overwrite the STEP file: {step_path}")
     try:
-        parts, triangles = stepconv.convert(
+        result = stepconv.write(
             step_path, out_path,
-            quality=args.quality, deflection=args.deflection, angle=args.angle,
-            min_size=args.min_size, merge_bodies=args.merge_bodies,
+            min_size=args.min_size or 0.0,
+            merge_bodies=args.merge_bodies is not False,
+            **stepconv.tessellation(args.quality, args.deflection, args.angle),
         )
+    except MemoryError:
+        _error(f"out of memory while converting {step_path.name}: use --quality coarse, "
+               "or split the assembly into smaller STEP files")
     except (ValueError, OSError) as e:
         _error(e)
-    size = out_path.stat().st_size / 1048576
-    print(f"Wrote {out_path}  ({parts} part{'s' * (parts != 1)}, {triangles} triangles, "
-          f"{size:.2f} MB)")
+    print(f"Wrote {out_path}  ({result.parts} part{'s' * (result.parts != 1)}, "
+          f"{result.triangles} triangles, {result.size / 1048576:.2f} MB)")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -118,8 +126,9 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         metavar="OUT",
-        help="Output file.  Defaults to <stem>.3dstep.html (render) or "
-             "<stem>.glb (convert) beside the input.",
+        help="Output file.  Defaults to <stem>.3dstep.html beside a project, or "
+             "beside a model the GLB name the designer gives it (My Board.step: "
+             "my_board.glb).",
     )
     parser.add_argument(
         "-t", "--theme",
@@ -151,26 +160,31 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         metavar="MM",
-        help="Convert only: linear deflection instead of a preset.",
+        help="Convert only: the largest distance between a surface and its "
+             "triangles, instead of the preset's share of each model's size.",
     )
     parser.add_argument(
         "--angle",
         type=float,
         default=None,
         metavar="DEG",
-        help="Convert only: angular deflection instead of a preset.",
+        help="Convert only: the largest angle between neighboring triangles, "
+             "instead of the preset's.",
     )
     parser.add_argument(
         "--min-size",
         type=float,
         default=None,
         metavar="MM",
-        help="Convert only: drop bodies whose bounding-box diagonal is smaller.",
+        help="Convert only: drop bodies whose bounding-box diagonal is smaller "
+             "(ids stay the same).",
     )
     parser.add_argument(
         "--merge-bodies",
-        action="store_true",
-        help="Convert only: merge every body under a product into one part.",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Convert only: one part per product, its bodies merged (the "
+             "default), or one part per body.",
     )
     parser.add_argument(
         "--version",
@@ -190,7 +204,8 @@ def _given(args: argparse.Namespace, names: tuple[str, ...]) -> list[str]:
         "--deflection": args.deflection is not None,
         "--angle": args.angle is not None,
         "--min-size": args.min_size is not None,
-        "--merge-bodies": args.merge_bodies,
+        "--merge-bodies": args.merge_bodies is True,
+        "--no-merge-bodies": args.merge_bodies is False,
     }
     return [name for name in names if flags[name]]
 
@@ -201,7 +216,19 @@ def _verb(flags: list[str], one: str, many: str) -> str:
 
 _DESIGNER_FLAGS = ("--port", "--no-browser")
 _RENDER_FLAGS = ("--theme",)
-_CONVERT_FLAGS = ("--quality", "--deflection", "--angle", "--min-size", "--merge-bodies")
+_CONVERT_FLAGS = ("--quality", "--deflection", "--angle", "--min-size", "--merge-bodies",
+                  "--no-merge-bodies")
+
+
+def _check_convert_values(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    if args.quality is not None and (args.deflection is not None or args.angle is not None):
+        parser.error("--quality is a preset for --deflection and --angle: give one or the other")
+    if args.deflection is not None and not (math.isfinite(args.deflection) and args.deflection > 0):
+        parser.error(f"--deflection must be a positive number of millimeters, got {args.deflection:g}")
+    if args.angle is not None and not (math.isfinite(args.angle) and 0 < args.angle < 180):
+        parser.error(f"--angle must be between 0 and 180 degrees, got {args.angle:g}")
+    if args.min_size is not None and not (math.isfinite(args.min_size) and args.min_size >= 0):
+        parser.error(f"--min-size must be zero or a positive number of millimeters, got {args.min_size:g}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -233,8 +260,7 @@ def main(argv: list[str] | None = None) -> None:
     render = _given(args, _RENDER_FLAGS)
     if render:
         parser.error(f"{_verb(render, 'applies', 'apply')} only to rendering a .toml project")
-    if args.quality is not None and (args.deflection is not None or args.angle is not None):
-        parser.error("--quality is a preset for --deflection and --angle: give one or the other")
+    _check_convert_values(parser, args)
     _convert(args)
 
 
