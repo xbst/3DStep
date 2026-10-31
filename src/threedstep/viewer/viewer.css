@@ -1,3 +1,561 @@
-/* 3DStep viewer stylesheet: a stub. The real stylesheet (the layout of the
-   viewer, its panel, HUD and labels) replaces this file wholesale. Until then a
-   generated page shows its static fallback with the browser's default styles. */
+/* 3DStep viewer stylesheet.
+ *
+ * Inlined verbatim into every generated page and loaded with <link> by the
+ * designer. Every color is a theme token (`--part-fill` and the rest, SPEC 10.1)
+ * read through an internal `--tds-*` variable that carries the default palette,
+ * so the viewer also renders without any theme CSS (the harness, a bare
+ * designer preview). The layout numbers come from the behavior variables the
+ * renderer emits (`--panel-max`, `--font-scale`, `--view-aspect`,
+ * `--view-min-h`, `--view-max-h`), again with defaults.
+ *
+ * Layout (SPEC 9.2): .tds > .tds-main > .tds-view + .tds-panel. The view and the
+ * panel sit side by side; `.tds.is-stacked` (set by the viewer from the root's
+ * width and `data-panel-stack-breakpoint`) puts the panel under the view;
+ * `[data-placement="overlay"]` floats the text over the view; `.is-fs` fills the
+ * screen. Class prefix: `tds-`. State classes: is-stacked, is-fs, is-active,
+ * is-flying, is-ready, is-touch, is-played.
+ */
+
+/* ── Tokens with their defaults (light), then dark ─────────────────── */
+
+.tds {
+  --tds-bg: var(--bg, #ffffff);
+  --tds-text: var(--text, #1a1a1a);
+  --tds-tip-bg: var(--tip-bg, #ffffff);
+  --tds-tip-border: var(--tip-border, #d0d0d0);
+  --tds-tip-shadow: var(--tip-shadow, rgba(0, 0, 0, .12));
+  --tds-hint-bg: var(--hint-bg, rgba(30, 30, 30, .75));
+  --tds-hint-text: var(--hint-text, #fff);
+  --tds-divider: var(--divider, #e5e5e5);
+  --tds-desc: var(--desc-color, #555);
+  --tds-scroll-thumb: var(--scroll-thumb, rgba(0, 0, 0, .22));
+  --tds-scroll-track: var(--scroll-track, transparent);
+  --tds-accent: var(--accent, #2563eb);
+  --tds-view-bg: var(--view-bg, #ffffff);
+  --tds-part-fill: var(--part-fill, #ffffff);
+  --tds-part-edge: var(--part-edge, #3a3a3a);
+  --tds-highlight-fill: var(--highlight-fill, #b8cff5);
+  --tds-highlight-edge: var(--highlight-edge, #2f5fb3);
+  --tds-arrow: var(--arrow, #2563eb);
+  --tds-arrow-edge: var(--arrow-edge, #1e3a8a);
+  --tds-label-bg: var(--label-bg, rgba(255, 255, 255, .92));
+  --tds-label-text: var(--label-text, #1a1a1a);
+  --tds-label-line: var(--label-line, #3a3a3a);
+  --tds-ghost-opacity: var(--ghost-opacity, 0.25);
+  --tds-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .tds {
+    --tds-bg: var(--bg, #131313);
+    --tds-text: var(--text, #e0e0e0);
+    --tds-tip-bg: var(--tip-bg, #1e1e1e);
+    --tds-tip-border: var(--tip-border, #3a3a3a);
+    --tds-tip-shadow: var(--tip-shadow, rgba(0, 0, 0, .4));
+    --tds-hint-bg: var(--hint-bg, rgba(240, 240, 240, .85));
+    --tds-hint-text: var(--hint-text, #131313);
+    --tds-divider: var(--divider, #333);
+    --tds-desc: var(--desc-color, #aaa);
+    --tds-scroll-thumb: var(--scroll-thumb, rgba(255, 255, 255, .20));
+    --tds-accent: var(--accent, #60a5fa);
+    --tds-view-bg: var(--view-bg, #1a1a1a);
+    --tds-part-fill: var(--part-fill, #2a2a2a);
+    --tds-part-edge: var(--part-edge, #d0d0d0);
+    --tds-highlight-fill: var(--highlight-fill, #2f4f8f);
+    --tds-highlight-edge: var(--highlight-edge, #9cc0ff);
+    --tds-arrow: var(--arrow, #60a5fa);
+    --tds-arrow-edge: var(--arrow-edge, #cfe2ff);
+    --tds-label-bg: var(--label-bg, rgba(30, 30, 30, .92));
+    --tds-label-text: var(--label-text, #e0e0e0);
+    --tds-label-line: var(--label-line, #bbbbbb);
+    --tds-ghost-opacity: var(--ghost-opacity, 0.3);
+    --tds-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] .tds {
+  --tds-bg: var(--bg, #131313);
+  --tds-text: var(--text, #e0e0e0);
+  --tds-tip-bg: var(--tip-bg, #1e1e1e);
+  --tds-tip-border: var(--tip-border, #3a3a3a);
+  --tds-tip-shadow: var(--tip-shadow, rgba(0, 0, 0, .4));
+  --tds-hint-bg: var(--hint-bg, rgba(240, 240, 240, .85));
+  --tds-hint-text: var(--hint-text, #131313);
+  --tds-divider: var(--divider, #333);
+  --tds-desc: var(--desc-color, #aaa);
+  --tds-scroll-thumb: var(--scroll-thumb, rgba(255, 255, 255, .20));
+  --tds-accent: var(--accent, #60a5fa);
+  --tds-view-bg: var(--view-bg, #1a1a1a);
+  --tds-part-fill: var(--part-fill, #2a2a2a);
+  --tds-part-edge: var(--part-edge, #d0d0d0);
+  --tds-highlight-fill: var(--highlight-fill, #2f4f8f);
+  --tds-highlight-edge: var(--highlight-edge, #9cc0ff);
+  --tds-arrow: var(--arrow, #60a5fa);
+  --tds-arrow-edge: var(--arrow-edge, #cfe2ff);
+  --tds-label-bg: var(--label-bg, rgba(30, 30, 30, .92));
+  --tds-label-text: var(--label-text, #e0e0e0);
+  --tds-label-line: var(--label-line, #bbbbbb);
+  --tds-ghost-opacity: var(--ghost-opacity, 0.3);
+  --tds-scheme: dark;
+}
+
+/* ── The standalone page (boot() adds `tds-page` to <html>) ───────── */
+
+html.tds-page, html.tds-page body { margin: 0; padding: 0; }
+html.tds-page body {
+  background: var(--bg, #ffffff);
+  color: var(--text, #1a1a1a);
+  font-family: var(--ui-font, Roboto, system-ui, sans-serif);
+}
+@media (prefers-color-scheme: dark) {
+  html.tds-page:not([data-theme="light"]) body { background: var(--bg, #131313); color: var(--text, #e0e0e0); }
+}
+html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: var(--text, #e0e0e0); }
+
+/* ── Root ─────────────────────────────────────────────────────────── */
+
+.tds {
+  position: relative;
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  font-family: var(--ui-font, Roboto, system-ui, sans-serif);
+  font-size: calc(15px * var(--font-scale, 1));
+  line-height: 1.45;
+  color: var(--tds-text);
+  -webkit-text-size-adjust: 100%;
+  outline: none;
+}
+.tds *, .tds *::before, .tds *::after { box-sizing: border-box; }
+.tds:focus-visible { outline: 2px solid var(--tds-accent); outline-offset: 2px; }
+.tds button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tds button:focus-visible { outline: 2px solid var(--tds-accent); outline-offset: 2px; }
+.tds a { color: var(--tds-accent); }
+.tds code {
+  font-family: var(--label-font, ui-monospace, "Roboto Mono", Menlo, monospace);
+  font-size: .92em;
+  padding: .05em .3em;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--tds-text) 10%, transparent);
+}
+
+/* ── Main layout: view beside the panel ───────────────────────────── */
+
+.tds-main {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  width: 100%;
+}
+.tds-view {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  aspect-ratio: var(--view-aspect, 1.6);
+  min-height: var(--view-min-h, 320px);
+  max-height: var(--view-max-h, 720px);
+  background: var(--tds-view-bg);
+  overflow: hidden;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tds-canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: pan-y;
+}
+.tds.is-active .tds-canvas { touch-action: none; }
+.tds.is-active .tds-view { touch-action: none; }
+.tds.is-active .tds-view::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 2px var(--tds-accent);
+  z-index: 3;
+}
+
+/* The panel: absolutely positioned beside the view so its height is the view's
+   and it scrolls inside; the row pads for it. Stacked, it goes back in flow. */
+.tds-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--panel-max, min(360px, 40vw));
+  max-width: 40vw;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--tds-tip-bg);
+  border-left: 1px solid var(--tds-divider);
+  scrollbar-width: thin;
+  scrollbar-color: var(--tds-scroll-thumb) var(--tds-scroll-track);
+}
+.tds[data-placement="right"]:not(.is-stacked):not(.is-fs) .tds-main { padding-right: min(var(--panel-max, min(360px, 40vw)), 40vw); }
+.tds-panel::-webkit-scrollbar { width: 8px; }
+.tds-panel::-webkit-scrollbar-thumb { background: var(--tds-scroll-thumb); border-radius: 4px; }
+.tds-panel::-webkit-scrollbar-track { background: var(--tds-scroll-track); }
+.tds-panel-in { padding: 14px 16px 12px; }
+
+/* Stacked (narrow, or panel_placement = below): panel under the view. */
+.tds.is-stacked .tds-main, .tds[data-placement="below"] .tds-main { flex-direction: column; padding-right: 0; }
+.tds.is-stacked .tds-panel, .tds[data-placement="below"] .tds-panel {
+  position: static;
+  width: auto;
+  max-width: none;
+  height: auto;
+  overflow: hidden;
+  border-left: 0;
+  border-top: 1px solid var(--tds-divider);
+}
+
+/* Overlay: text and nav float over the bottom of the view, no step list. */
+.tds[data-placement="overlay"] .tds-main { padding-right: 0; }
+.tds[data-placement="overlay"] .tds-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 0;
+  width: auto;
+  max-width: none;
+  max-height: 55%;
+  border: 0;
+  border-top: 1px solid var(--tds-divider);
+  background: color-mix(in srgb, var(--tds-tip-bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  z-index: 4;
+}
+.tds[data-placement="overlay"] .tds-panel-head,
+.tds[data-placement="overlay"] .tds-steps { display: none; }
+.tds[data-placement="overlay"] .tds-panel-in { padding: 10px 14px 10px; }
+
+/* ── Fullscreen ───────────────────────────────────────────────────── */
+
+.tds.is-fs, .tds:fullscreen {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 2147483000;
+  background: var(--tds-view-bg);
+}
+.tds.is-fs .tds-main, .tds:fullscreen .tds-main { height: 100%; padding-right: 0; flex-direction: row; }
+.tds.is-fs .tds-view, .tds:fullscreen .tds-view { aspect-ratio: auto; height: 100%; max-height: none; min-height: 0; }
+.tds.is-fs .tds-panel, .tds:fullscreen .tds-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: auto;
+  bottom: 0;
+  width: auto;
+  max-width: none;
+  max-height: 45%;
+  overflow: auto;
+  border: 0;
+  border-top: 1px solid var(--tds-divider);
+  background: color-mix(in srgb, var(--tds-tip-bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  z-index: 4;
+}
+.tds.is-fs .tds-panel-head, .tds:fullscreen .tds-panel-head,
+.tds.is-fs .tds-steps, .tds:fullscreen .tds-steps { display: none; }
+
+/* ── Controls modes ───────────────────────────────────────────────── */
+
+.tds[data-controls="minimal"] .tds-panel,
+.tds[data-controls="none"] .tds-panel { display: none; }
+.tds[data-controls="minimal"] .tds-main,
+.tds[data-controls="none"] .tds-main { padding-right: 0; }
+.tds[data-controls="none"] .tds-hud,
+.tds[data-controls="none"] .tds-hint,
+.tds[data-controls="none"] .tds-caption { display: none; }
+.tds[data-controls="full"] .tds-hud-nav { display: none; }
+.tds-caption {
+  display: none;
+  padding: 6px 12px;
+  font-size: .95em;
+  color: var(--tds-text);
+  background: var(--tds-tip-bg);
+  border-top: 1px solid var(--tds-divider);
+}
+.tds[data-controls="minimal"] .tds-caption { display: block; }
+.tds[data-controls="minimal"] .tds-caption:empty { display: none; }
+
+/* ── Overlay: labels and leader lines ─────────────────────────────── */
+
+.tds-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 2;
+}
+.tds-overlay line { stroke: var(--tds-label-line); stroke-width: 1.5; }
+.tds-overlay circle { fill: var(--tds-label-line); }
+.tds-labels { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+.tds-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: 220px;
+  padding: 3px 8px;
+  border: 1px solid var(--tds-label-line);
+  border-radius: 6px;
+  background: var(--tds-label-bg);
+  color: var(--tds-label-text);
+  font-family: var(--label-font, var(--ui-font, Roboto, system-ui, sans-serif));
+  font-size: calc(13px * var(--font-scale, 1));
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 1px 4px var(--tds-tip-shadow);
+  transition: opacity .25s ease;
+  will-change: transform;
+}
+.tds.is-flying .tds-label, .tds.is-flying .tds-overlay { opacity: 0; }
+.tds-overlay { transition: opacity .25s ease; }
+.tds-label.is-off, .tds-overlay .is-off { display: none; }
+
+/* ── HUD ──────────────────────────────────────────────────────────── */
+
+.tds-hud {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  pointer-events: none;
+  z-index: 5;
+  font-size: calc(13px * var(--font-scale, 1));
+}
+.tds-hud > * { pointer-events: auto; }
+.tds-hud-left, .tds-hud-right { display: flex; align-items: center; gap: 6px; }
+.tds-counter {
+  display: inline-block;
+  padding: 4px 10px;
+  border: 1px solid var(--tds-tip-border);
+  border-radius: 999px;
+  background: var(--tds-tip-bg);
+  color: var(--tds-desc);
+  font-family: var(--label-font, var(--ui-font, Roboto, system-ui, sans-serif));
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 1px 4px var(--tds-tip-shadow);
+}
+.tds-hud button, .tds-nav button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--tds-tip-border);
+  border-radius: 8px;
+  background: var(--tds-tip-bg);
+  color: var(--tds-text);
+  box-shadow: 0 1px 4px var(--tds-tip-shadow);
+  line-height: 1;
+}
+.tds-hud button:hover, .tds-nav button:hover:not(:disabled) { border-color: var(--tds-accent); color: var(--tds-accent); }
+.tds-hud button:disabled, .tds-nav button:disabled { opacity: .45; cursor: default; }
+.tds-hud button svg { width: 18px; height: 18px; display: block; }
+.tds-hud button.is-on { color: var(--tds-accent); border-color: var(--tds-accent); }
+.tds-hud button[hidden] { display: none; }
+.tds-hud .tds-glyph { font-size: 17px; font-weight: 600; }
+.tds-btn-fs .i-min, .tds.is-fs .tds-btn-fs .i-max, .tds:fullscreen .tds-btn-fs .i-max { display: none; }
+.tds.is-fs .tds-btn-fs .i-min, .tds:fullscreen .tds-btn-fs .i-min { display: block; }
+.tds-btn-play .i-reset, .tds.is-played .tds-btn-play .i-play { display: none; }
+.tds.is-played .tds-btn-play .i-reset { display: block; }
+
+/* ── Hint pill and credit ─────────────────────────────────────────── */
+
+.tds-hint {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--tds-hint-bg);
+  color: var(--tds-hint-text);
+  font-size: calc(12px * var(--font-scale, 1));
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  transition: opacity .35s ease, transform .35s ease;
+}
+.tds-hint-text { overflow: hidden; text-overflow: ellipsis; }
+.tds-credit {
+  font-family: var(--label-font, var(--ui-font, Roboto, system-ui, sans-serif));
+  font-weight: 600;
+  letter-spacing: .02em;
+  opacity: .85;
+}
+.tds-hint.hf { opacity: 0; }
+.tds-hint.hh .tds-hint-text { display: none; }
+.tds-hint.hh { padding: 3px 9px; opacity: .8; }
+
+/* ── Fallback box (no WebGL, load errors, still loading) ──────────── */
+
+.tds-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  color: var(--tds-text);
+  background: var(--tds-view-bg);
+  z-index: 6;
+}
+.tds-fallback[hidden] { display: none; }
+.tds-fallback p { margin: 0; max-width: 36em; }
+.tds-fallback .tds-fallback-detail { font-size: .9em; color: var(--tds-desc); }
+.tds-fallback a { color: var(--tds-accent); }
+.tds-spinner {
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--tds-divider);
+  border-top-color: var(--tds-accent);
+  border-radius: 50%;
+  animation: tds-spin .9s linear infinite;
+}
+@keyframes tds-spin { to { transform: rotate(360deg); } }
+
+/* ── Panel content ────────────────────────────────────────────────── */
+
+.tds-panel-head { padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--tds-divider); }
+.tds-title { font-size: 1.1em; font-weight: 600; line-height: 1.3; }
+.tds-desc { margin-top: 4px; font-size: .92em; color: var(--tds-desc); }
+.tds-desc:empty, .tds-panel-head[hidden] { display: none; }
+
+.tds-steps {
+  list-style: none;
+  margin: 0 0 10px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--tds-divider);
+  font-size: .92em;
+}
+.tds-steps[hidden] { display: none; }
+.tds-steps li { margin: 0; padding: 0; }
+.tds-steps button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  text-align: left;
+  color: var(--tds-desc);
+}
+.tds-steps button:hover { background: color-mix(in srgb, var(--tds-accent) 10%, transparent); color: var(--tds-text); }
+.tds-steps .tds-step-n {
+  flex: none;
+  min-width: 1.6em;
+  font-family: var(--label-font, var(--ui-font, Roboto, system-ui, sans-serif));
+  font-variant-numeric: tabular-nums;
+  color: var(--tds-desc);
+}
+.tds-steps li.is-current button { color: var(--tds-text); font-weight: 600; background: color-mix(in srgb, var(--tds-accent) 14%, transparent); }
+.tds-steps li.is-current .tds-step-n { color: var(--tds-accent); }
+.tds-steps li.is-done .tds-step-n { color: var(--tds-accent); opacity: .7; }
+
+.tds-text { min-height: 2em; }
+.tds-step-title { margin: 0 0 6px; font-size: 1.05em; font-weight: 600; line-height: 1.3; }
+.tds-step-kicker {
+  font-family: var(--label-font, var(--ui-font, Roboto, system-ui, sans-serif));
+  font-size: .78em;
+  color: var(--tds-accent);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.tds-parts { margin: 0 0 8px; font-size: .9em; color: var(--tds-desc); }
+.tds-parts:empty { display: none; }
+.tds-parts span { color: var(--tds-text); }
+.tds-body p { margin: 0 0 .7em; }
+.tds-body p:last-child { margin-bottom: 0; }
+.tds-note {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--tds-tip-border);
+  border-left: 3px solid var(--tds-accent);
+  border-radius: 6px;
+  font-size: .92em;
+  background: color-mix(in srgb, var(--tds-accent) 7%, transparent);
+}
+.tds-note:empty { display: none; }
+.tds-note svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--tds-accent); }
+
+.tds-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--tds-divider);
+}
+.tds-nav button { flex: none; height: 34px; padding: 0 12px; }
+.tds-nav button svg { width: 16px; height: 16px; }
+.tds-progress { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--tds-divider); overflow: hidden; }
+.tds-progress-bar { height: 100%; width: 0; background: var(--tds-accent); transition: width .3s ease; }
+
+/* ── Narrow screens ───────────────────────────────────────────────── */
+
+@media (max-width: 480px) {
+  .tds { font-size: calc(14px * var(--font-scale, 1)); }
+  .tds-panel-in { padding: 12px 12px 10px; }
+  .tds-hud { top: 6px; left: 6px; right: 6px; }
+  .tds-hud button, .tds-nav button { min-width: 36px; height: 36px; }
+  .tds-nav button { flex: 1 1 auto; }
+  .tds-nav .tds-progress { order: -1; flex: 1 0 100%; margin-bottom: 8px; }
+  .tds-nav { flex-wrap: wrap; }
+  .tds-label { max-width: 160px; }
+}
+
+/* ── Editor mode ──────────────────────────────────────────────────── */
+
+.tds.is-editor .tds-hint, .tds.is-editor .tds-panel, .tds.is-editor .tds-caption { display: none; }
+.tds.is-editor .tds-main { padding-right: 0; }
+.tds.is-editor .tds-view { aspect-ratio: auto; height: 100%; min-height: 0; max-height: none; }
+.tds.is-editor, .tds.is-editor .tds-main { height: 100%; }
+
+/* ── Reduced motion ───────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .tds *, .tds *::before, .tds *::after { transition: none !important; animation-duration: .01s !important; }
+}
