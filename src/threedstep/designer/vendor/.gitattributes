@@ -1,0 +1,3 @@
+# Vendored files stay byte for byte as published (their SHA-256s are pinned in
+# tools/vendor/pins.json), so Git must not convert their line endings.
+* -text
