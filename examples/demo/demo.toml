@@ -1,0 +1,124 @@
+# A synthetic demo project: a board on four standoffs, held down by four
+# screws. It is small on purpose and uses every key of the project format once,
+# so it doubles as a smoke test. Render it with:
+#
+#     3dstep examples/demo/demo.toml
+
+[assembly]
+title = "Mount a board on standoffs"
+description = "A synthetic assembly that shows every feature of a 3DStep project."
+models = ["demo.glb"]
+theme = "default"
+theme_dir = "./themes"
+style = "lineart"
+up = "z"
+start = "hidden"
+
+[camera]
+position = [116.0, -80.0, 77.0]
+target = [30.0, 20.0, 5.0]
+fov = 35.0
+projection = "orthographic"
+
+[[part]]
+id = "board"
+name = "Circuit board"
+color = "#1f6b40"
+
+[[part]]
+id = "standoffs"
+name = "M3 x 6 mm standoffs"
+
+[[part]]
+id = "screws"
+name = "M3 x 8 mm screws"
+
+[[step]]
+id = "standoffs"
+title = "Place the standoffs"
+text = """
+Set the four **M3 x 6 mm** standoffs on the bench, one under each corner hole of the board.
+
+The arrows show where each one goes.
+"""
+show = ["standoffs"]
+highlight = ["standoffs"]
+
+[step.camera]
+fit = ["standoffs"]
+
+[[step.move]]
+parts = ["standoffs"]
+offset = [0.0, 0.0, 12.0]
+
+[[step]]
+id = "tighten"
+title = "Tighten the standoffs"
+text = """
+Turn the standoff clockwise by hand until it seats; `M3` threads need no tool.
+The other three are hidden while you work on the first: tighten them the same way.
+
+See the [3DStep documentation](https://doctools.isiks.tech/3dstep/) for more.
+"""
+note = "Hand tight is enough: the standoffs are brass."
+hide = ["standoff_2", "standoff_3", "standoff_4"]
+highlight = ["standoff_1"]
+
+[step.camera]
+position = [40.0, -30.0, 30.0]
+target = [4.0, 4.0, 3.0]
+fov = 40.0
+projection = "perspective"
+
+[[step.arrow]]
+from = [4.0, 4.0, 10.0]
+to = [4.0, 4.0, 6.0]
+kind = "rotate"
+turns = 0.75
+radius = 4.0
+attach = "standoff_1"
+
+[[step]]
+id = "board"
+title = "Place the board"
+text = "Lower the board onto the standoffs with the corner holes over them."
+show = ["standoffs", "board"]
+highlight = ["board"]
+
+[step.camera]
+position = [116.0, -80.0, 90.0]
+target = [30.0, 20.0, 10.0]
+projection = "orthographic"
+
+[[step.move]]
+parts = ["board"]
+offset = [0.0, 0.0, 20.0]
+rotate = [0.0, 0.0, 10.0]
+
+[[step.label]]
+text = "Circuit board"
+at = [60.0, 20.0, 7.6]
+side = "right"
+attach = "board"
+
+[[step]]
+id = "screws"
+title = "Fasten the board"
+text = "Drive the four **M3 x 8 mm** screws through the board into the standoffs."
+note = "Do not overtighten: the standoffs are brass."
+show = ["screws"]
+highlight = ["screws"]
+ghost = ["standoffs"]
+
+[[step.move]]
+parts = ["screws"]
+offset = [0.0, 0.0, 15.0]
+arrow = false
+
+[[step.arrow]]
+from = [56.0, 36.0, 19.0]
+to = [56.0, 36.0, 12.0]
+kind = "straight"
+color = "#dc2626"
+label = "4x M3 x 8"
+attach = "screw_4"
