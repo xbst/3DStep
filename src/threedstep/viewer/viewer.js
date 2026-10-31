@@ -12,7 +12,9 @@
  *                                    play, reset, setScene, setModels, getCamera,
  *                                    setCamera, fit, setStyle, setProjection,
  *                                    pick, setSelection, previewPlacement,
- *                                    screenshot, resize, dispose, ...)
+ *                                    screenshot, resize, dispose, ...; in editor
+ *                                    mode also `editor`, the hooks the designer's
+ *                                    viewport tools use)
  *   ThreeDStep.foldSteps(scene, tree) the pure state folding of SPEC 8
  *   ThreeDStep.renderText(text)       the step-text markup of SPEC 9.6
  *   ThreeDStep.defaults               behavior defaults and the default palettes
@@ -853,6 +855,8 @@
     var tweens = [];
     var arrows = [];           // active arrow records
     var labels = [];           // active label records
+    var selArrow = -1, selLabel = -1;   // editor: the selected explicit arrow / label of the step
+    var overlay3 = null;       // editor: gizmos and previews, drawn over the finished frame
     var matCache = {};
     var unloads = [];          // cleanup callbacks
     var raycaster = null;
@@ -1056,6 +1060,7 @@
       scene3 = new THREE.Scene();
       root3 = new THREE.Group();
       scene3.add(root3);
+      if (editor) overlay3 = new THREE.Scene();
 
       cameraP = new THREE.PerspectiveCamera(35, 1.6, 0.1, 1000);
       cameraO = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
@@ -1726,16 +1731,19 @@
       }
     }
     function sizes() { return arrowSizes(modelRadius * 2, behavior.arrowScale); }
-    function arrowMaterial(color) {
-      if (style === "lineart") return color ? lineartMaterial("literal", EDGE_CLASS.arrow, "front", color) : lineartMaterial("arrow", EDGE_CLASS.arrow, "front");
-      var key = "shaded-arrow|" + (color || "");
+    // `selected` (editor): the arrow is the designer's selection, drawn with
+    // the accent edge class (line art) or in the accent color (shaded).
+    function arrowMaterial(color, selected) {
+      var cls = selected ? EDGE_CLASS.selected : EDGE_CLASS.arrow;
+      if (style === "lineart") return color ? lineartMaterial("literal", cls, "front", color) : lineartMaterial("arrow", cls, "front");
+      var key = "shaded-arrow|" + (color || "") + (selected ? "|sel" : "");
       var m = matCache[key];
       if (!m) {
-        m = new THREE.MeshBasicMaterial({ color: cssColor(color || tokens.arrow) });
-        m.userData = { fill: color ? "literal" : "arrow", literal: color, shaded: true };
+        m = new THREE.MeshBasicMaterial({ color: cssColor(selected ? tokens.accent : (color || tokens.arrow)) });
+        m.userData = { fill: selected ? "accent" : (color ? "literal" : "arrow"), literal: color, shaded: true };
         matCache[key] = m;
-      } else if (!color) {
-        m.color.copy(cssColor(tokens.arrow));
+      } else if (!color || selected) {
+        m.color.copy(cssColor(selected ? tokens.accent : tokens.arrow));
       }
       return m;
     }
@@ -1746,14 +1754,14 @@
     }
     // A straight arrow: a shaft (unit cylinder scaled) and a cone head, laid
     // from `from` to `to` in the parent's frame.
-    function makeStraightArrow(color) {
+    function makeStraightArrow(color, selected) {
       arrowGeometries();
       var s = sizes();
       var g = new THREE.Group();
-      var shaft = new THREE.Mesh(unitShaft, arrowMaterial(color));
-      var head = new THREE.Mesh(unitCone, arrowMaterial(color));
+      var shaft = new THREE.Mesh(unitShaft, arrowMaterial(color, selected));
+      var head = new THREE.Mesh(unitCone, arrowMaterial(color, selected));
       g.add(shaft); g.add(head);
-      var rec = { group: g, shaft: shaft, head: head, color: color, kind: "straight" };
+      var rec = { group: g, shaft: shaft, head: head, color: color, kind: "straight", selected: !!selected };
       rec.set = function (from, to) {
         var f = new THREE.Vector3().fromArray(from), t = new THREE.Vector3().fromArray(to);
         var d = t.clone().sub(f), len = d.length();
@@ -1769,13 +1777,13 @@
         orientY(head, d);
         return true;
       };
-      rec.refresh = function () { var m = arrowMaterial(color); shaft.material = m; head.material = m; };
+      rec.refresh = function () { var m = arrowMaterial(color, rec.selected); shaft.material = m; head.material = m; };
       rec.dispose = function () { if (g.parent) g.parent.remove(g); };
       return rec;
     }
     // A rotate arrow: an arc (tube) of `turns` around the axis from -> to,
     // centered at `from`, with a cone head at its end.
-    function makeRotateArrow(a) {
+    function makeRotateArrow(a, selected) {
       arrowGeometries();
       var s = sizes();
       var axis = new THREE.Vector3().fromArray(vsub(a.to, a.from));
@@ -1798,16 +1806,16 @@
       }
       var curve = new Arc();
       var segs = Math.max(12, Math.round(48 * Math.abs(turns)));
-      var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, segs, s.shaftRadius, 10, false), arrowMaterial(a.color));
-      var head = new THREE.Mesh(unitCone, arrowMaterial(a.color));
+      var tube = new THREE.Mesh(new THREE.TubeGeometry(curve, segs, s.shaftRadius, 10, false), arrowMaterial(a.color, selected));
+      var head = new THREE.Mesh(unitCone, arrowMaterial(a.color, selected));
       var end = curve.getPoint(1), tangent = curve.getPoint(1).sub(curve.getPoint(0.995)).normalize();
       if (turns < 0) tangent.negate().negate();
       head.scale.set(s.headRadius, s.headLength, s.headRadius);
       head.position.copy(end).addScaledVector(tangent, s.headLength / 2);
       orientY(head, tangent);
       g.add(tube); g.add(head);
-      var rec = { group: g, kind: "rotate", color: a.color };
-      rec.refresh = function () { var m = arrowMaterial(a.color); tube.material = m; head.material = m; };
+      var rec = { group: g, kind: "rotate", color: a.color, selected: !!selected };
+      rec.refresh = function () { var m = arrowMaterial(a.color, rec.selected); tube.material = m; head.material = m; };
       rec.dispose = function () { if (g.parent) g.parent.remove(g); tube.geometry.dispose(); };
       return rec;
     }
@@ -1826,12 +1834,14 @@
     function buildArrows(st) {
       if (!webgl) return;
       clearArrows();
-      st.arrows.forEach(function (a) {
-        var rec = a.kind === "rotate" ? makeRotateArrow(a) : makeStraightArrow(a.color);
+      st.arrows.forEach(function (a, i) {
+        var selected = editor && i === selArrow;
+        var rec = a.kind === "rotate" ? makeRotateArrow(a, selected) : makeStraightArrow(a.color, selected);
         if (rec.kind === "straight") rec.set(a.from, a.to);
         rec.group.traverse(function (o) { o.layers.set(0); });
         attachParent(a.attach).add(rec.group);
         rec.spec = a;
+        rec.index = i;   // its index in the step's explicit arrows (editor picking)
         arrows.push(rec);
       });
       // auto arrows: one per moved part, from the displayed to the assembled center
@@ -1871,14 +1881,19 @@
     }
     function buildLabels(st) {
       clearLabels();
-      var specs = st.labels.slice();
-      st.arrows.forEach(function (a) {
-        if (a.label) specs.push({ text: a.label, at: a.from.slice(), side: "auto", attach: a.attach, tail: true });
+      var specs = st.labels.map(function (l, i) { return Object.assign({}, l, { index: i }); });
+      st.arrows.forEach(function (a, i) {
+        if (a.label) specs.push({ text: a.label, at: a.from.slice(), side: "auto", attach: a.attach, tail: true, index: i });
       });
       specs.forEach(function (spec) {
         if (!spec.text) return;
         var div = el("div", "tds-label");
         div.textContent = spec.text;
+        if (editor) {
+          // The designer selects labels (and arrows by their tail label) by clicking them.
+          div.setAttribute(spec.tail ? "data-tds-arrow" : "data-tds-label", String(spec.index));
+          div.classList.toggle("is-selected", spec.tail ? spec.index === selArrow : spec.index === selLabel);
+        }
         var line = doc.createElementNS(svgNS, "line");
         var dot = doc.createElementNS(svgNS, "circle");
         dot.setAttribute("r", "3");
@@ -1990,6 +2005,13 @@
       } else {
         camera.layers.enableAll();
         renderer.render(scene3, camera);
+        camera.layers.set(0);
+      }
+      // Editor overlay (gizmos, tool previews): over everything, with the
+      // frame's depth still in place for whatever tests against it.
+      if (overlay3 && overlay3.children.length) {
+        camera.layers.enableAll();
+        renderer.render(overlay3, camera);
         camera.layers.set(0);
       }
       handle.stats.frames++;
@@ -2129,21 +2151,46 @@
     on(btnProj, "click", function () { setProjection(camera === cameraP ? "orthographic" : "perspective"); });
     on(btnFs, "click", function (e) { e.stopPropagation(); toggleFullscreen(); });
 
-    function pickAt(clientX, clientY) {
-      if (!webgl || !modelsLoaded) return null;
+    function setRay(clientX, clientY) {
       var r = canvas.getBoundingClientRect();
       var ndc = new THREE.Vector2(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
       raycaster.setFromCamera(ndc, camera);
+    }
+    // The part under a point: {id, point, normal, distance}. In editor mode
+    // the step's explicit arrows are picked too: {arrow: index, point, normal,
+    // distance} when one is nearer than any part.
+    function pickAt(clientX, clientY) {
+      if (!webgl || !modelsLoaded) return null;
+      setRay(clientX, clientY);
       var objs = [];
       partList.forEach(function (p) { if (p.pivot.visible) objs.push.apply(objs, p.meshes); });
       var hits = raycaster.intersectObjects(objs, false);
+      var best = null;
       for (var i = 0; i < hits.length; i++) {
         var part = hits[i].object.userData.tdsPart;
         if (!part || part.alpha <= 0) continue;
         var n = hits[i].face ? hits[i].face.normal.clone().transformDirection(hits[i].object.matrixWorld) : new THREE.Vector3(0, 0, 1);
-        return { id: part.id, point: [hits[i].point.x, hits[i].point.y, hits[i].point.z], normal: [n.x, n.y, n.z], distance: hits[i].distance };
+        best = { id: part.id, point: [hits[i].point.x, hits[i].point.y, hits[i].point.z], normal: [n.x, n.y, n.z], distance: hits[i].distance };
+        break;
       }
-      return null;
+      if (editor) {
+        var arrowObjs = [];
+        arrows.forEach(function (rec) { if (rec.index != null && rec.group.visible) arrowObjs.push(rec.group); });
+        if (arrowObjs.length) {
+          var ah = raycaster.intersectObjects(arrowObjs, true);
+          for (var k = 0; k < ah.length; k++) {
+            if (best && ah[k].distance >= best.distance) break;
+            // an arrow's meshes sit directly under its record's group
+            var grp = ah[k].object.parent, rec = null;
+            for (var j = 0; j < arrows.length; j++) if (arrows[j].group === grp) { rec = arrows[j]; break; }
+            if (!rec || rec.index == null) continue;
+            var an = ah[k].face ? ah[k].face.normal.clone().transformDirection(ah[k].object.matrixWorld) : new THREE.Vector3(0, 0, 1);
+            best = { arrow: rec.index, point: [ah[k].point.x, ah[k].point.y, ah[k].point.z], normal: [an.x, an.y, an.z], distance: ah[k].distance };
+            break;
+          }
+        }
+      }
+      return best;
     }
     function focusAt(e) {
       var hit = pickAt(e.clientX, e.clientY);
@@ -2289,6 +2336,24 @@
       });
       requestRender();
     }
+    // Editor: which explicit arrow and label of the step are selected
+    // ({arrow, label}, indices or -1); they are drawn in the accent color.
+    function setAnnotationSelection(sel) {
+      sel = sel || {};
+      var a = typeof sel.arrow === "number" ? sel.arrow : -1;
+      var l = typeof sel.label === "number" ? sel.label : -1;
+      if (a === selArrow && l === selLabel) return;
+      selArrow = a; selLabel = l;
+      arrows.forEach(function (rec) {
+        if (rec.index == null) return;
+        var want = rec.index === selArrow;
+        if (want !== rec.selected) { rec.selected = want; rec.refresh(); }
+      });
+      labels.forEach(function (lb) {
+        lb.div.classList.toggle("is-selected", lb.spec.tail ? lb.spec.index === selArrow : lb.spec.index === selLabel);
+      });
+      requestRender();
+    }
     function previewPlacement(id, placement) {
       var ids = registry && registry.members[id] ? registry.members[id] : [id];
       var pivotCenter = groupBox[id] ? groupBox[id].getCenter(new THREE.Vector3()) : null;
@@ -2412,6 +2477,28 @@
       dispose: dispose,
       parts: function () { return partList.map(function (p) { return p.id; }); },
       tree: function () { return registry; },
+      // Editor hooks for the designer's viewport tools (editor: true only).
+      editor: editor ? {
+        overlay: function () { return overlay3; },           // a THREE.Scene drawn over the frame (gizmos, previews)
+        camera: function () { return camera; },              // the live THREE camera (changes with the projection)
+        controls: function () { return controls; },          // the OrbitControls, to pause while a gizmo drags
+        canvas: canvas,
+        requestRender: requestRender,
+        setAnnotationSelection: setAnnotationSelection,
+        // A world point to client coordinates: {x, y, visible}.
+        project: function (p) {
+          if (!webgl) return null;
+          var v = new THREE.Vector3().fromArray(p).project(camera);
+          var r = canvas.getBoundingClientRect();
+          return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height, visible: v.z >= -1 && v.z <= 1 };
+        },
+        // The pointer ray through a client point: {origin, direction} in model space.
+        ray: function (clientX, clientY) {
+          if (!webgl) return null;
+          setRay(clientX, clientY);
+          return { origin: raycaster.ray.origin.toArray(), direction: raycaster.ray.direction.toArray() };
+        }
+      } : null,
       _debug: {
         setFullscreenClass: setFullscreenClass, tokens: function () { return tokens; }, parts: function () { return parts; },
         scene3: function () { return scene3; }, resolveCamera: resolveCamera, isVisible: function () { return visible; },
