@@ -12,7 +12,7 @@ Guidance for AI coding agents working in the 3DStep repository. Human-facing doc
 
 The project TOML is the interface between the designer and the renderer; the generated HTML is the interface between the renderer and the publishing step.
 
-**Status.** The package core is in place: the project and theme loaders, the GLB reader and writer, the renderer, the command line (the convert mode's dispatch included), the local server, the Pyodide payload, the designer's bridge, the bundled themes and a synthetic example. Still to come: the viewer runtime (`viewer/viewer.js` and `viewer.css` are stubs, and `viewer/vendor/` with the Three.js bundle does not exist yet, so a page shows only its written steps), the STEP import pipeline (`designer/js/import/`, `designer/vendor/`), the designer app (`designer/index.html` is a placeholder) and its viewport tools, and the STEP converter (`stepconv.py`).
+**Status.** In place: the package core (the project and theme loaders, the GLB reader and writer, the renderer, the command line, the local server, the Pyodide payload, the designer's bridge, the bundled themes and a synthetic example), the viewer runtime (`viewer/`, with the vendored Three.js bundle), the browser's STEP import pipeline (`designer/js/import/`, `designer/vendor/`) and the STEP converter (`stepconv.py`, the `step` extra). Still to come: the designer app (`designer/index.html` is a placeholder) and its viewport tools.
 
 ## Repository layout
 
@@ -23,6 +23,7 @@ The project TOML is the interface between the designer and the renderer; the gen
   - `glb.py`: the GLB reader (`read_glb`, `node_ids`, `tree`, `triangle_count`, `bbox`, `metadata`, `validate`) and writer (`Model`, `Node`, `Mesh`, `Primitive`, `slugify`, `assign_ids`, `write_glb`).
   - `renderer.py`: `build_scene` (the scene JSON the viewer consumes), the theme and behavior CSS, the theme-sync script, `generate_html`, and `build_page`, the one sequence (load, read models, check ids, theme, render) that both the command line and the bridge run.
   - `serve.py`: the local designer server (the designer at `/`, the viewer runtime at `/viewer/`). `payload.py`: locates the designer and builds the Pyodide payload; `python -m threedstep.payload [--force]` builds it by hand.
+  - `stepconv.py`: the STEP converter behind `3dstep model.step` (the optional `step` extra, see below): `read_step`, `build_model`, `convert_step`, `write`. Only the convert mode imports it, and the payload leaves it out.
   - `themes/`: theme definitions (`*.toml`). **Source of truth** for themes, read by the designer through the bridge.
   - `viewer/`: the runtime every generated page inlines and the designer loads: `viewer.js` (a classic script exposing `window.ThreeDStep`), `viewer.css`, and `vendor/three.bundle.js` (built by `tools/vendor/`).
   - `designer/`: the designer (vanilla ES modules, no framework, no bundler) and `py/bridge.py`, the only Python it adds.
@@ -45,6 +46,13 @@ The project TOML is the interface between the designer and the renderer; the gen
 - **The designer only sees bundled themes.** A project naming its own `theme_dir` renders in the browser with the bundled theme of the same name, or the default; `bridge.generate` and `bridge.validate` return a warning saying so. Keep that reporting intact: without it the designer silently disagrees with the CLI.
 - **The generated page can be driven from outside**, with PinConnect's contracts: `?theme=dark|light`, a `{pinconnectTheme: "dark"|"light"}` message (the key is PinConnect's on purpose, so one host script drives both tools), or the same-origin parent's `data-md-color-scheme` / `data-theme` / `dark` class, tracked live; else `prefers-color-scheme`. The theme-sync script in `renderer.py` is PinConnect's verbatim; keep it so. Height reporting (`{mdIframeHeight: h}` for md-iframe) lives in the viewer's `boot()`, not in the renderer.
 - **Behaviors reach the viewer two ways**: CSS variables (`--panel-max`, `--font-scale`, `--view-aspect`, `--view-min-h`, `--view-max-h`) plus the panel stacking media query, and a `data-*` attribute on `.tds` for every behavior key (`transition_ms` is `data-transition-ms`; booleans are `"true"` / `"false"`). The project's `style` is `data-style`.
+
+## The STEP converter (`3dstep[step]`)
+
+- **The extra.** `pip install "3dstep[step]"` adds `cadquery-ocp-novtk` (OCP 8.0, the Python bindings of OpenCascade 8.0: wheels for CPython 3.11 to 3.14 on Windows, Linux and macOS, 48 to 68 MB each, about 170 MB installed). On Python 3.9 and 3.10 the extra installs nothing and `3dstep model.step` says what is missing. Nothing but the convert mode imports OCP: rendering, the designer and the payload never need it.
+- **The parity rule.** The converter repeats the designer's import step by step, so the same STEP file gives the same tree, ids, labels, colors and primitives on both sides, and a project TOML the designer wrote validates against the GLB the command line writes. `read_step` walks the file the way occt-import-js 0.0.23 does (its `importer-xcaf.cpp` and `importer-utils.cpp`: free shapes in label order, the mesh-node rule that flattens everything below the first level of components, names and colors found through `XCAFDoc_ShapeTool::Search` and followed through references, located shapes, the bounding-box-ratio deflection) and `build_model` is a port of `buildModel` in `designer/js/import/step-import.js` (groups, merged or split bodies, labels, ids assigned before the size filter, one primitive per color). The default output name is the designer's too (`glb_name_for`: `ToqueCAN 2.step` becomes `toquecan_2.glb`). Change both sides together; the local `tests/test_stepconv.py` compares them on the fixtures.
+- **Mesh bytes differ between the two importers.** occt-import-js is built on OpenCascade 7.6 and OCP on 8.0, and their meshers do not always split a face the same way: the small fixtures get the same vertex and triangle counts but not always the same triangles, and `ToqueCAN.step` gets 14% more triangles from OCP (150 of its 541 bodies differ). Commit the GLB the designer wrote; use the converter in pipelines that regenerate GLBs from STEP files, not where a byte-identical file is expected.
+- **OpenCascade prints to stdout** through its default messenger. `read_step` swaps the messenger's printer for a temporary file while it reads, so the command prints only its own lines, and quotes the reader's last messages when a file cannot be read.
 
 ## Old names
 
@@ -71,6 +79,7 @@ Convert a STEP model (needs `pip install "3dstep[step]"`, Python 3.11+):
 
 ```bash
 3dstep model.step --quality fine        # writes model.glb
+3dstep "ToqueCAN 2.step" --min-size 2   # writes toquecan_2.glb, the name the designer gives it
 ```
 
 Build the designer's payload by hand (only needed to serve `src/threedstep/designer/` some other way):
