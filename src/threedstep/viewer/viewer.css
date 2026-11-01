@@ -209,7 +209,7 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 .tds-panel::-webkit-scrollbar { width: 8px; }
 .tds-panel::-webkit-scrollbar-thumb { background: var(--tds-scroll-thumb); border-radius: 4px; }
 .tds-panel::-webkit-scrollbar-track { background: var(--tds-scroll-track); }
-.tds-panel-in { padding: 14px 16px 12px; }
+.tds-panel-in { padding: 14px 16px 0; }
 
 /* Stacked (narrow, or panel_placement = below): panel under the view. */
 .tds.is-stacked .tds-main, .tds[data-placement="below"] .tds-main { flex-direction: column; padding-right: 0; }
@@ -243,7 +243,7 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 }
 .tds[data-placement="overlay"] .tds-panel-head,
 .tds[data-placement="overlay"] .tds-steps { display: none; }
-.tds[data-placement="overlay"] .tds-panel-in { padding: 10px 14px 10px; }
+.tds[data-placement="overlay"] .tds-panel-in { padding: 10px 14px 0; }
 
 /* ── Fullscreen ───────────────────────────────────────────────────── */
 
@@ -523,14 +523,20 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 .tds-note:empty { display: none; }
 .tds-note svg { flex: none; width: 16px; height: 16px; margin-top: 2px; color: var(--tds-accent); }
 
+/* Sticky, so Previous and Next stay in reach while a long step scrolls the
+   panel beside the view; it carries the panel's bottom padding. */
 .tds-nav {
+  position: sticky;
+  bottom: 0;
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 14px;
-  padding-top: 10px;
+  padding: 10px 0 12px;
   border-top: 1px solid var(--tds-divider);
+  background: var(--tds-tip-bg);
 }
+.tds[data-placement="overlay"] .tds-nav, .tds.is-fs .tds-nav, .tds:fullscreen .tds-nav { padding-bottom: 10px; background: none; }
 .tds-nav button { flex: none; height: 34px; padding: 0 12px; }
 .tds-nav button svg { width: 16px; height: 16px; }
 .tds-progress { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--tds-divider); overflow: hidden; }
@@ -540,7 +546,8 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 
 @media (max-width: 480px) {
   .tds { font-size: calc(14px * var(--font-scale, 1)); }
-  .tds-panel-in { padding: 12px 12px 10px; }
+  .tds-panel-in { padding: 12px 12px 0; }
+  .tds-nav { padding-bottom: 10px; }
   .tds-hud { top: 6px; left: 6px; right: 6px; }
   .tds-hud button, .tds-nav button { min-width: 36px; height: 36px; }
   .tds-nav button { flex: 1 1 auto; }
