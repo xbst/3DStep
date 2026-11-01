@@ -17,9 +17,10 @@
 // dirty-changed for the unload guard.
 
 import {
-  Arrow, CameraSpec, Label, Move, PartMeta, Project, Step, addToIdList, allParts, buildRegistry, expandIds,
-  foldVisibility, membersOf, removeFromIds, rewriteVisibility, stepIdFor,
+  ARROW_KINDS, Arrow, CameraSpec, LABEL_SIDES, Label, Move, PartMeta, Project, Step, addToIdList, allParts, buildRegistry,
+  expandIds, foldVisibility, membersOf, removeFromIds, rewriteVisibility, stepIdFor,
 } from "./project-model.js";
+import { isValidId } from "./import/ids.js";
 import {
   DEFAULT_RUNTIME_BYTES, bboxOf, deleteNodes, deletedIds, estimateGlbSize, glbNameFor, mergeGroup as mergeModelGroup,
   nodeIndex, triangleCount,
@@ -700,11 +701,13 @@ export class ProjectState {
   }
 
   addArrow(fields = {}, origin = "visual") {
+    if (refusedFields(fields)) return false;
     return this._subEdit("arrows", arrows => { arrows.push(new Arrow(cleanArrow(fields))); },
       origin, arrows => ({ parts: [], arrow: arrows.length - 1, label: -1 }));
   }
 
   updateArrow(index, fields, origin = "visual") {
+    if (refusedFields(fields)) return false;
     return this._subEdit("arrows", arrows => {
       if (!arrows[index]) return false;
       Object.assign(arrows[index], cleanArrow(fields));
@@ -721,11 +724,13 @@ export class ProjectState {
   }
 
   addLabel(fields = {}, origin = "visual") {
+    if (refusedFields(fields)) return false;
     return this._subEdit("labels", labels => { labels.push(new Label(cleanLabel(fields))); },
       origin, labels => ({ parts: [], arrow: -1, label: labels.length - 1 }));
   }
 
   updateLabel(index, fields, origin = "visual") {
+    if (refusedFields(fields)) return false;
     return this._subEdit("labels", labels => {
       if (!labels[index]) return false;
       Object.assign(labels[index], cleanLabel(fields));
@@ -919,6 +924,17 @@ function withFit(cam, fit) {
 
 function vec(v, digits = 4) {
   return Array.isArray(v) && v.length === 3 && v.every(Number.isFinite) ? v.map(x => round(x, digits)) : undefined;
+}
+
+// Arrow and label fields the loader would reject: an attach that is not a
+// valid id (empty means not attached), a kind or a side outside its list, a
+// label text with nothing in it. The mutators refuse them rather than hold a
+// project whose TOML no longer loads.
+function refusedFields(f) {
+  if (typeof f.attach === "string" && f.attach !== "" && !isValidId(f.attach)) return true;
+  if (typeof f.kind === "string" && !ARROW_KINDS.includes(f.kind)) return true;
+  if (typeof f.side === "string" && !LABEL_SIDES.includes(f.side)) return true;
+  return typeof f.text === "string" && !f.text.trim();
 }
 
 function cleanArrow(f) {
