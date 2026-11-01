@@ -360,6 +360,13 @@ def _render_fallback(project: Project) -> str:
 
 _TOKEN_RE = re.compile(r"@@([A-Z_]+)@@")
 
+# An inline icon (a cube outline), so a page opened on its own (the fullscreen
+# fallback's new tab) shows one and the browser never asks the host for a
+# /favicon.ico it may not have, which would log an error.
+_ICON = ("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E"
+         "%3Cpath d='M8 1.5l5.6 3.2v6.6L8 14.5l-5.6-3.2V4.7zM2.4 4.7L8 8l5.6-3.3M8 8v6.5' "
+         "fill='none' stroke='%232563eb' stroke-width='1.4' stroke-linejoin='round'/%3E%3C/svg%3E")
+
 # Tokens are replaced in one pass, so nothing inserted is scanned again: a step
 # text or a script that happens to contain "@@SCENE@@" stays as it is. The
 # inlined CSS and JavaScript need no brace escaping either.
@@ -370,6 +377,7 @@ _HTML_TEMPLATE = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>@@TITLE@@</title>
+<link rel="icon" href="@@ICON@@">
 @@HEAD@@<style>
 @@STYLE@@
 </style>
@@ -423,6 +431,7 @@ def generate_html(project: Project, models: dict[str, bytes], *,
 
     values = {
         "TITLE": html.escape(a.title),
+        "ICON": _ICON,
         "HEAD": head,
         "STYLE": _inline_css("\n".join(
             part for part in (_render_theme_css(theme), css.strip(), _render_behavior_css(theme)) if part
