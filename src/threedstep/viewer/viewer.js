@@ -1584,7 +1584,7 @@
     // Fly from the current camera to `cam` over `ms` (0 snaps).
     var camTween = null;
     function flyTo(cam, ms, done) {
-      if (camTween) { removeTween(camTween); camTween = null; }
+      if (camTween) { removeTween(camTween); camTween = null; controls.enabled = true; }
       var projection = cam.projection === "perspective" ? "perspective" : "orthographic";
       var from = getCamera();
       var switching = (projection === "perspective") !== (camera === cameraP);
