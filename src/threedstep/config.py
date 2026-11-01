@@ -745,6 +745,12 @@ _BARE_HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
 _HEX_RE = re.compile(r"^#[0-9a-fA-F]+$")
 # rgb(), hsl(), oklch(), color-mix(), var(), linear-gradient() and friends.
 _FUNC_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9-]*\(.*\)$", re.DOTALL)
+# A numeric string a number token accepts: ASCII digits only, so float()'s
+# extras (underscores, non-ASCII digits, "inf", "nan") never reach the CSS.
+# _CSS_NUMBER_RE is the subset CSS itself reads, emitted as written; the rest
+# ("1.", "2.e-1") is emitted normalized.
+_NUMBER_RE = re.compile(r"[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?", re.ASCII)
+_CSS_NUMBER_RE = re.compile(r"[+-]?(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?", re.ASCII)
 
 
 def _check_color(token: str, value: str, scope: str, known: bool,
@@ -797,10 +803,12 @@ def _check_color(token: str, value: str, scope: str, known: bool,
 
 def _check_number_token(token: str, value: object, scope: str, warnings: list[str]) -> str:
     """A number token such as ``ghost-opacity``: a number or a numeric string
-    from 0 to 1, emitted as written."""
+    from 0 to 1, emitted as written when CSS reads it as written."""
     where = f"[colors.{scope}] {token}"
     try:
         if isinstance(value, bool):
+            raise ValueError
+        if isinstance(value, str) and not _NUMBER_RE.fullmatch(value.strip()):
             raise ValueError
         number = float(value.strip() if isinstance(value, str) else value)
     except OverflowError:
@@ -812,7 +820,9 @@ def _check_number_token(token: str, value: object, scope: str, warnings: list[st
     if not 0.0 <= number <= 1.0:
         warnings.append(f"{where} = {value!r} is outside 0 to 1; using {min(1.0, max(0.0, number)):g}.")
         return f"{min(1.0, max(0.0, number)):g}"
-    return value.strip() if isinstance(value, str) else f"{number:g}"
+    if isinstance(value, str) and _CSS_NUMBER_RE.fullmatch(value.strip()):
+        return value.strip()
+    return f"{number:g}"
 
 
 def _theme_colors(raw: object, scope: str, warnings: list[str]) -> dict[str, str]:
