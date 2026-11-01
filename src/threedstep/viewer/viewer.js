@@ -173,7 +173,9 @@
     var theme = q.get("theme");
     if (theme === "dark" || theme === "light") out.theme = theme;
     var step = q.get("step");
-    if (step !== null && step.trim() !== "") out.step = /^\d+$/.test(step.trim()) ? parseInt(step, 10) : step.trim();
+    // Kept as a string: stepIndex reads a numeric string as a 1-based step
+    // number (?step=1 is the first step), a number as a 0-based index.
+    if (step !== null && step.trim() !== "") out.step = step.trim();
     var controls = q.get("controls");
     if (controls && CONTROLS.indexOf(controls) >= 0) out.controls = controls;
     var style = q.get("style");
@@ -2620,7 +2622,10 @@
     var reporter = startHeightReporter(root, isFs);
     window.addEventListener("message", function (e) {
       var d = e.data;
-      if (d && typeof d === "object" && "threedstepStep" in d && viewer) viewer.goToStep(d.threedstepStep, {});
+      // A number is a 1-based step number, as in ?step=N.
+      if (d && typeof d === "object" && "threedstepStep" in d && viewer) {
+        viewer.goToStep(typeof d.threedstepStep === "number" ? String(d.threedstepStep) : d.threedstepStep, {});
+      }
     });
     viewer.heightReporter = reporter;
     return viewer;
