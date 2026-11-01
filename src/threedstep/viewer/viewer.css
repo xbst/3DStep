@@ -186,7 +186,10 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 
 /* The panel: absolutely positioned beside the view and the bar under it (the
    root is its containing block), so its height is theirs and it scrolls inside;
-   the row and the bar make room for it. Stacked, it goes back in flow. */
+   the row and the bar make room for it. Stacked, it goes back in flow. The
+   wheel scrolls the panel, then the page at its ends: on a docs page the
+   page must scroll wherever the wheel lands (SPEC 9.9), and a panel with
+   nothing to scroll passes the wheel straight on. */
 .tds-panel {
   position: absolute;
   top: 0;
@@ -195,7 +198,6 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
   width: var(--panel-max, min(360px, 40vw));
   max-width: 40vw;
   overflow: auto;
-  overscroll-behavior: contain;
   background: var(--tds-tip-bg);
   border-left: 1px solid var(--tds-divider);
   scrollbar-width: thin;
@@ -260,6 +262,8 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 }
 .tds.is-fs .tds-main, .tds:fullscreen .tds-main { flex: 1 1 0; min-height: 0; padding-right: 0; flex-direction: row; }
 .tds.is-fs .tds-view, .tds:fullscreen .tds-view { aspect-ratio: auto; height: 100%; max-height: none; min-height: 0; }
+/* The page hidden behind a fullscreen viewer must not move when its panel
+   reaches an end. */
 .tds.is-fs .tds-panel, .tds:fullscreen .tds-panel {
   position: absolute;
   left: 0;
@@ -270,6 +274,7 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
   max-width: none;
   max-height: 45%;
   overflow: auto;
+  overscroll-behavior: contain;
   border: 0;
   border-top: 1px solid var(--tds-divider);
   background: color-mix(in srgb, var(--tds-tip-bg) 88%, transparent);
