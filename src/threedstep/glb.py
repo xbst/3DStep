@@ -551,11 +551,11 @@ def _quantize(value: float, limit: int) -> int:
 
 
 def _material_key(color) -> tuple[float, float, float, float]:
-    return tuple(round(min(1.0, max(0.0, float(c))), 4) for c in color)
+    return tuple(math.floor(min(1.0, max(0.0, float(c))) * 10000 + 0.5) / 10000 for c in color)
 
 
 def _material(rgba: tuple[float, float, float, float]) -> dict:
-    digits = "".join(f"{round(c * 255):02x}" for c in (rgba if rgba[3] < 1.0 else rgba[:3]))
+    digits = "".join(f"{math.floor(c * 255 + 0.5):02x}" for c in (rgba if rgba[3] < 1.0 else rgba[:3]))
     return {
         "name": f"color_{digits}",
         "pbrMetallicRoughness": {
