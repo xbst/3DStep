@@ -482,14 +482,32 @@
 
   // ── Height reporting (SPEC 9.8), the dedupe without DOM ────────────
   function createHeightReporter(opts) {
-    var last = -1;
+    var last = -1, settling = false;
     var threshold = num(opts.threshold, 2);
-    return {
+    var setTimer = opts.setTimeout || (typeof setTimeout === "function" ? setTimeout : null);
+    function measure() { return Math.ceil(num(opts.measure(), -1)); }
+    var api = {
       report: function () {
         if (opts.isFullscreen && opts.isFullscreen()) return false;
-        var h = Math.ceil(num(opts.measure(), -1));
+        var h = measure();
         if (!(h >= 0)) return false;
-        if (last >= 0 && Math.abs(h - last) <= threshold) return false;
+        if (last >= 0 && Math.abs(h - last) <= threshold) {
+          // A small change is not posted at once (no chatter while things
+          // move), but once they settle, so the frame ends where the page does.
+          if (h !== last && setTimer && !settling) {
+            settling = true;
+            setTimer(function () { settling = false; api.settle(); }, num(opts.settleMs, 250));
+          }
+          return false;
+        }
+        last = h;
+        opts.post(h);
+        return true;
+      },
+      settle: function () {
+        if (opts.isFullscreen && opts.isFullscreen()) return false;
+        var h = measure();
+        if (!(h >= 0) || h === last) return false;
         last = h;
         opts.post(h);
         return true;
@@ -497,6 +515,7 @@
       reset: function () { last = -1; },
       last: function () { return last; }
     };
+    return api;
   }
 
   // ── Theme tokens ───────────────────────────────────────────────────
