@@ -88,6 +88,41 @@ def _write_project(project_toml: str) -> None:
     PROJECT_PATH.write_text(project_toml, encoding="utf-8")
 
 
+def _custom_dir(theme_dir: str) -> bool:
+    return bool(theme_dir) and theme_dir != _DEFAULT_THEME_DIR
+
+
+def _unknown_theme(name: str, theme_dir: str) -> str:
+    """Explain a theme the designer cannot find, without claiming more than it
+    knows: the 3dstep command also looks in the project's theme_dir, which the
+    browser cannot see."""
+    bundled = ", ".join(_slugs(_BUNDLED_THEMES))
+    note = f"Theme '{name}' is not one of the themes bundled with 3DStep ({bundled})."
+    if _custom_dir(theme_dir):
+        return (f"{note} The 3dstep command can read it from '{theme_dir}', but the "
+                "designer cannot generate with it.")
+    return (f"{note} The 3dstep command finds it only as themes/{name}.toml beside "
+            "the saved project.")
+
+
+def _theme_problems(project) -> tuple[list[str], list[str]]:
+    """Resolve the project's theme as the 3dstep command does: (errors, warnings).
+
+    A theme missing from a custom theme_dir is only a warning, since the
+    command line may find it there; with the default theme_dir it is most
+    likely a typo, so it is an error.
+    """
+    a = project.assembly
+    try:
+        theme = load_theme(a.theme, PROJECT_PATH, a.theme_dir)
+    except FileNotFoundError:
+        note = _unknown_theme(a.theme, a.theme_dir)
+        return ([], [note]) if _custom_dir(a.theme_dir) else ([note], [])
+    except ValueError as e:
+        return str(e).splitlines(), []
+    return [], theme.warnings
+
+
 def _local_dir_warnings(theme_dir: str) -> list[str]:
     """Warn when the project points at theme files the browser cannot read.
 
@@ -96,7 +131,7 @@ def _local_dir_warnings(theme_dir: str) -> list[str]:
     project. The CLI, which can read the directory, would produce a different
     file. Say so rather than hand back output that quietly disagrees with it.
     """
-    if theme_dir and theme_dir != _DEFAULT_THEME_DIR:
+    if _custom_dir(theme_dir):
         return [
             f"This project reads themes from '{theme_dir}', which the designer "
             "cannot open. A theme defined there was replaced by the bundled theme "
@@ -126,9 +161,11 @@ def validate(project_toml: str, model_trees_json: str) -> str:
             check_ids(project, trees)
         except ValueError as e:
             errors.extend(str(e).splitlines())
+    theme_errors, theme_warnings = _theme_problems(project)
     return json.dumps({
-        "errors": errors,
-        "warnings": project.warnings + _local_dir_warnings(project.assembly.theme_dir),
+        "errors": errors + theme_errors,
+        "warnings": project.warnings + _local_dir_warnings(project.assembly.theme_dir)
+        + theme_warnings,
     })
 
 
@@ -161,7 +198,10 @@ def generate(project_toml: str, models=None, theme_name: str = "") -> str:
     try:
         page = build_page(PROJECT_PATH, theme_name=theme_name)
     except FileNotFoundError as e:
-        raise RuntimeError(f"{e}\n\n{_CUSTOM_DIR_HINT}") from None
+        theme_dir = project.assembly.theme_dir
+        hint = (_CUSTOM_DIR_HINT if _custom_dir(theme_dir)
+                else _unknown_theme(theme_name or project.assembly.theme, theme_dir))
+        raise RuntimeError(f"{e}\n\n{hint}") from None
     return json.dumps({
         "html": page.html,
         "warnings": _local_dir_warnings(project.assembly.theme_dir) + page.warnings,
