@@ -128,7 +128,8 @@
   var TOKEN_NAMES = Object.keys(LIGHT);
   var DEFAULT_DIR_Z = [0.62, -0.72, 0.52];   // front-right-above, Z-up (SPEC 9.4)
   var DEFAULT_DIR_Y = [0.62, 0.52, 0.72];    // the same view Y-up, where the front is +Z
-  var EDGE_CLASS = { none: 0, part: 1, highlight: 2, arrow: 3, selected: 4 };
+  var EDGE_CLASS = { none: 0, part: 1, highlight: 2, arrow: 3, selected: 4, hover: 5 };
+  var HOVER_TINT = 0.25;     // editor: how far a hovered part's fill goes toward the hover color
   var MAX_KERNEL = 36;
 
   // ── Small helpers ──────────────────────────────────────────────────
@@ -1067,6 +1068,7 @@
     var arrows = [];           // active arrow records
     var labels = [];           // active label records
     var selArrow = -1, selLabel = -1;   // editor: the selected explicit arrow / label of the step
+    var hovered = null;        // editor: the part a click of the designer's picking tools would hit
     var overlay3 = null;       // editor: gizmos and previews, drawn over the finished frame
     var matCache = {};
     var unloads = [];          // cleanup callbacks
@@ -1366,11 +1368,11 @@
       ec[EDGE_CLASS.highlight].copy(cssColor(tokens.highlightEdge, true));
       ec[EDGE_CLASS.arrow].copy(cssColor(tokens.arrowEdge, true));
       ec[EDGE_CLASS.selected].copy(cssColor(tokens.accent, true));
-      ec[5].copy(cssColor(tokens.accent, true));
+      ec[EDGE_CLASS.hover].copy(hoverColor(true));
       compMat.uniformsNeedUpdate = true;
       Object.keys(matCache).forEach(function (key) {
         var m = matCache[key];
-        if (m.isShaderMaterial) m.uniforms.uFill.value.copy(cssColor(m.userData.fill === "literal" ? m.userData.literal : tokens[m.userData.fill], true));
+        if (m.isShaderMaterial) m.uniforms.uFill.value.copy(lineartFill(m.userData.fill, m.userData.literal, m.userData.tint));
       });
       // A transparent view shows the page behind it: light the parts from an
       // opaque bg, else from the scheme's default view background.
@@ -1390,18 +1392,29 @@
       requestRender();
     }
 
-    // Line-art material for a fill token (or a literal color) and an edge class.
-    function lineartMaterial(fillToken, cls, side, literal) {
-      var key = fillToken + "|" + cls + "|" + side + "|" + (literal || "");
+    // Editor: the color of the part a designer tool would hit, the accent at
+    // half strength over the edge color. Its edges take it, and its fill
+    // leans toward it: lighter than the selection's accent, and unlike the
+    // themes' highlight fills, which are tints of the accent.
+    function hoverColor(raw) {
+      return cssColor(tokens.partEdge, raw).lerp(cssColor(tokens.accent, raw), 0.5);
+    }
+    // Line-art material for a fill token (or a literal color) and an edge class;
+    // `tint` (editor: a hovered part) mixes the hover color into the fill.
+    function lineartFill(fillToken, literal, tint) {
+      var fill = cssColor(fillToken === "literal" ? literal : tokens[fillToken], true);
+      return tint ? fill.lerp(hoverColor(true), tint) : fill;
+    }
+    function lineartMaterial(fillToken, cls, side, literal, tint) {
+      var key = fillToken + "|" + cls + "|" + side + "|" + (literal || "") + (tint ? "|" + tint : "");
       var m = matCache[key];
       if (m) return m;
-      var fill = fillToken === "literal" ? cssColor(literal, true) : cssColor(tokens[fillToken], true);
       m = new THREE.ShaderMaterial({
         glslVersion: THREE.GLSL3, vertexShader: GBUF_VERT, fragmentShader: GBUF_FRAG,
-        uniforms: { uFill: { value: fill }, uCls: { value: cls / 255 } },
+        uniforms: { uFill: { value: lineartFill(fillToken, literal, tint) }, uCls: { value: cls / 255 } },
         side: side === "double" ? THREE.DoubleSide : THREE.FrontSide
       });
-      m.userData = { fill: fillToken, literal: literal, cls: cls };
+      m.userData = { fill: fillToken, literal: literal, cls: cls, tint: tint || 0 };
       matCache[key] = m;
       return m;
     }
@@ -1435,6 +1448,7 @@
       partList = [];
       groupBox = {};
       camCache = [];
+      hovered = null;
       modelsLoaded = false;
     }
 
@@ -1510,7 +1524,7 @@
             id: info.id, label: info.label, obj: obj, pivot: pivot, meshes: meshes, colors: colors,
             box: pbox, center: center, half: [halfSize.x, halfSize.y, halfSize.z],
             doubleSided: doubleSided, mats: {},
-            cls: "normal", alpha: 1, visible: true, selected: false,
+            cls: "normal", alpha: 1, visible: true, selected: false, hovered: false,
             offset: new THREE.Vector3(), quat: new THREE.Quaternion(), pivotCenter: center.clone(),
             fadeMat: null
           };
@@ -1547,11 +1561,14 @@
       var layer = translucent ? 1 : 0;
       part.meshes.forEach(function (m) { m.layers.set(layer); });
       part.pivot.visible = part.alpha > 0 && part.visible;
+      // Editor: the part a designer tool would hit, unless it is selected
+      // (the selection keeps its look).
+      var hover = part.hovered && !part.selected;
       if (style === "lineart") {
         if (!translucent) {
-          var cls = part.selected ? EDGE_CLASS.selected : (part.cls === "highlight" ? EDGE_CLASS.highlight : EDGE_CLASS.part);
+          var cls = part.selected ? EDGE_CLASS.selected : hover ? EDGE_CLASS.hover : (part.cls === "highlight" ? EDGE_CLASS.highlight : EDGE_CLASS.part);
           var fillToken = part.cls === "highlight" ? "highlightFill" : "partFill";
-          var mat = lineartMaterial(fillToken, cls, partSides(part));
+          var mat = lineartMaterial(fillToken, cls, partSides(part), undefined, hover ? HOVER_TINT : 0);
           part.meshes.forEach(function (m) { m.material = mat; });
         } else {
           var fill = cssColor(part.cls === "highlight" ? tokens.highlightFill : tokens.partFill);
@@ -1561,9 +1578,11 @@
           if (part.cls === "ghost") fill.lerp(cssColor(tokens.partEdge), 0.5);
           // Translucent parts skip the edge pass, so the editor's selection
           // cue is an accent tint here (and a less faint ghost), as the
-          // shaded style tints a selected part.
+          // shaded style tints a selected part; a hovered part takes the
+          // hover color instead.
           if (part.selected) fill.lerp(cssColor(tokens.accent), 0.6);
-          var ghostOpacity = part.selected ? Math.max(tokens.ghostOpacity, 0.5) : tokens.ghostOpacity;
+          else if (hover) fill.lerp(hoverColor(), 0.6);
+          var ghostOpacity = part.selected ? Math.max(tokens.ghostOpacity, 0.5) : hover ? Math.max(tokens.ghostOpacity, 0.4) : tokens.ghostOpacity;
           if (!part.fadeMat) part.fadeMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
           part.fadeMat.color.copy(fill);
           part.fadeMat.opacity = part.alpha * (part.cls === "ghost" ? ghostOpacity : 1);
@@ -1582,7 +1601,9 @@
         part.mats.shaded.forEach(function (m, i) {
           m.color.copy(part.colors[i]);
           if (part.cls === "highlight") m.color.lerp(hi, 0.6);
-          if (part.selected) m.emissive.copy(accent).multiplyScalar(0.35); else m.emissive.set(0, 0, 0);
+          if (part.selected) m.emissive.copy(accent).multiplyScalar(0.35);
+          else if (hover) m.emissive.copy(accent).multiplyScalar(0.15);
+          else m.emissive.set(0, 0, 0);
           m.transparent = translucent;
           m.opacity = translucent ? part.alpha * (part.cls === "ghost" ? tokens.ghostOpacity : 1) : 1;
           m.depthWrite = !translucent;
@@ -2767,6 +2788,17 @@
       });
       requestRender();
     }
+    // Editor: the part a click of the designer's picking tools would hit (a
+    // part id, or null), drawn lighter than the selection. One frame per change.
+    function setHover(id) {
+      var part = id != null && parts[id] ? parts[id] : null;
+      if ((part ? part.id : null) === hovered) return;
+      var prev = hovered != null ? parts[hovered] : null;
+      hovered = part ? part.id : null;
+      if (prev) { prev.hovered = false; refreshPartMaterials(prev); }
+      if (part) { part.hovered = true; refreshPartMaterials(part); }
+      requestRender();
+    }
     // Editor: which explicit arrow and label of the step are selected
     // ({arrow, label}, indices or -1); they are drawn in the accent color.
     function setAnnotationSelection(sel) {
@@ -2931,6 +2963,8 @@
         canvas: canvas,
         requestRender: requestRender,
         setAnnotationSelection: setAnnotationSelection,
+        setHover: setHover,                                  // the part a tool's click would hit (id or null)
+        getHover: function () { return hovered; },
         // A world point to client coordinates: {x, y, visible}.
         project: function (p) {
           if (!webgl) return null;

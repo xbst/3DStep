@@ -3,7 +3,9 @@
 // axis is the surface normal into the part, so the arrow turns clockwise as
 // you look at the surface; the radius comes from the part's size), Label
 // (one click, then type in the inspector field that gets focus), and the pick
-// modes behind the inspector's "Pick" buttons and the fit list. Points are
+// modes behind the inspector's "Pick" buttons and the fit list. While one of
+// them is active, the part a click would hit (the first surface under the
+// pointer) is marked in the viewport and named in the prompt. Points are
 // stored in the picked part's assembled frame (attach), so they travel with
 // the part during Play (SPEC 9.7); the inspector can detach them.
 
@@ -23,6 +25,9 @@ const PROMPT_HEAD = "Arrow: click the head point · Shift keeps it on the tail's
 const PROMPT_ROTATE = "Rotate arrow: click a surface; its normal is the axis · Esc leaves the tool";
 const PROMPT_LABEL = "Label: click a point on a part, then type its text · Esc leaves the tool";
 
+// The tools whose click lands on the first surface under the pointer.
+const PICKING_TOOLS = ["arrow", "rotate-arrow", "label", "pick"];
+
 export class AnnotateTools {
   constructor(viewport) {
     this.vp = viewport;
@@ -31,8 +36,8 @@ export class AnnotateTools {
     this.preview = null;     // THREE objects of the rubber-band arrow
     this.pending = null;     // a pick mode: {mode: "point" | "parts", resolve, onPick, prompt, previous}
     this.shift = false;
+    this.pointer = null;     // the pointer over the viewer's canvas: {clientX, clientY, shiftKey}
     this._hoverRaf = 0;
-    this._hoverEvent = null;
     viewport.registerTool("arrow", this._arrowTool(), { label: "Arrow", title: "Arrow (A): click the tail point on a part, then the head point; Shift keeps the head on the surface normal", icon: ANNOTATE_ICONS.arrow, group: "annotate" });
     viewport.registerTool("rotate-arrow", this._rotateArrowTool(), { label: "Rotate arrow", title: "Rotate arrow (Shift+A): click a surface; the arrow turns around its normal", icon: ANNOTATE_ICONS.rotateArrow, group: "annotate" });
     viewport.registerTool("label", this._labelTool(), { label: "Label", title: "Label (L): click a point on a part, then type the text", icon: ANNOTATE_ICONS.label, group: "annotate" });
@@ -41,17 +46,22 @@ export class AnnotateTools {
     viewport.canPickPoints = true;
     window.addEventListener("keydown", (e) => { if (e.key === "Shift") this.shift = true; });
     window.addEventListener("keyup", (e) => { if (e.key === "Shift") this.shift = false; });
-    viewport.viewerEl.addEventListener("pointermove", (e) => this._queueHover(e), { passive: true });
-    viewport.viewerEl.addEventListener("pointerleave", () => this._showPreview(null));
-    viewport.on("ready", () => { this.preview = null; });
+    viewport.viewerEl.addEventListener("pointermove", (e) => this._pointerMove(e), { passive: true });
+    viewport.viewerEl.addEventListener("pointerleave", () => { this.pointer = null; this._updateHover(); });
+    // A new viewer (a theme change) starts without the preview or the mark.
+    viewport.on("ready", () => { this.preview = null; this._updateHover(); });
+    // An edit or a step change can put something else under a still pointer.
+    this.state.on("project-changed", () => this._queueHover());
+    this.state.on("step-changed", () => this._queueHover());
   }
 
   // ── Arrow ──────────────────────────────────────────────────────────
 
   _arrowTool() {
     return {
-      activate: () => { this.tail = null; this.vp.setPrompt(PROMPT_TAIL); },
-      deactivate: () => { this.tail = null; this._showPreview(null); this.vp.setPrompt(""); },
+      activate: () => { this.tail = null; this.vp.setPrompt(PROMPT_TAIL); this._updateHover(); },
+      deactivate: () => { this.tail = null; this._showPreview(null); this.vp.setPrompt(""); this._setHover(null); },
+      onCamera: () => this._queueHover(),
       onPick: (hit, event) => {
         if (hit && hit.arrow != null) return false;   // selecting an existing arrow
         if (!this.tail) {
@@ -105,8 +115,9 @@ export class AnnotateTools {
 
   _rotateArrowTool() {
     return {
-      activate: () => this.vp.setPrompt(PROMPT_ROTATE),
-      deactivate: () => this.vp.setPrompt(""),
+      activate: () => { this.vp.setPrompt(PROMPT_ROTATE); this._updateHover(); },
+      deactivate: () => { this.vp.setPrompt(""); this._setHover(null); },
+      onCamera: () => this._queueHover(),
       onPick: (hit, event) => {
         if (hit && hit.arrow != null) return false;
         if (!hit || !hit.id) return true;
@@ -134,8 +145,9 @@ export class AnnotateTools {
 
   _labelTool() {
     return {
-      activate: () => this.vp.setPrompt(PROMPT_LABEL),
-      deactivate: () => this.vp.setPrompt(""),
+      activate: () => { this.vp.setPrompt(PROMPT_LABEL); this._updateHover(); },
+      deactivate: () => { this.vp.setPrompt(""); this._setHover(null); },
+      onCamera: () => this._queueHover(),
       onPick: (hit) => {
         if (hit && hit.arrow != null) return false;
         if (!hit || !hit.id) return true;
@@ -157,9 +169,10 @@ export class AnnotateTools {
 
   _pickTool() {
     return {
-      activate: () => { if (this.pending) this.vp.setPrompt(this.pending.prompt); },
+      activate: () => { if (this.pending) this.vp.setPrompt(this.pending.prompt); this._updateHover(); },
       deactivate: () => {
         this.vp.setPrompt("");
+        this._setHover(null);
         const p = this.pending;
         this.pending = null;
         if (p && p.resolve) p.resolve(null);
@@ -179,6 +192,7 @@ export class AnnotateTools {
         }
         return true;
       },
+      onCamera: () => this._queueHover(),
       cancel: () => { this._endPick(); return true; },
     };
   }
@@ -206,20 +220,39 @@ export class AnnotateTools {
     this.vp.setTool("pick");
   }
 
-  // ── Rubber-band preview of the arrow being placed ──────────────────
+  // ── The part under the pointer, and the arrow being placed ─────────
 
-  _queueHover(e) {
-    if (!this.tail || this.vp.getTool() !== "arrow") return;
-    this._hoverEvent = e;
+  // Only the canvas takes the tools' clicks: over a label or the HUD, a click
+  // hits nothing.
+  _pointerMove(e) {
+    const ed = this.vp.viewer && this.vp.viewer.editor;
+    this.pointer = ed && e.target === ed.canvas ? { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey } : null;
+    this._queueHover();
+  }
+
+  _queueHover() {
     if (this._hoverRaf) return;
-    this._hoverRaf = requestAnimationFrame(() => {
-      this._hoverRaf = 0;
-      const ev = this._hoverEvent;
-      if (!ev || !this.tail || !this.vp.viewer || !this.vp.viewer.ready) return;
-      const hit = this.vp.viewer.pick(ev.clientX, ev.clientY);
-      const head = this._headFor(hit && hit.id ? hit : null, ev.clientX, ev.clientY, ev.shiftKey || this.shift);
-      this._showPreview(head);
-    });
+    this._hoverRaf = requestAnimationFrame(() => { this._hoverRaf = 0; this._updateHover(); });
+  }
+
+  // While a picking tool is active: the part a click would hit (the first
+  // surface under the pointer; an existing arrow there takes the click
+  // instead, so no part), and the arrow tool's rubber band.
+  _updateHover() {
+    const viewer = this.vp.viewer, p = this.pointer, tool = this.vp.getTool();
+    const picking = tool === "pick" ? !!this.pending : PICKING_TOOLS.includes(tool);
+    const hit = picking && p && viewer && viewer.ready ? viewer.pick(p.clientX, p.clientY) : null;
+    const part = hit && hit.arrow == null && hit.id ? hit : null;
+    this._setHover(part ? part.id : null);
+    this._showPreview(tool === "arrow" && this.tail && p ? this._headFor(part, p.clientX, p.clientY, p.shiftKey || this.shift) : null);
+  }
+
+  // Marks the part in the viewer (which ignores a repeat) and names it after
+  // the prompt; null clears both.
+  _setHover(id) {
+    const ed = this.vp.viewer && this.vp.viewer.editor;
+    if (ed) ed.setHover(id);
+    this.vp.setPromptTarget(id ? this.state.displayName(id) : "", id || "");
   }
 
   _ensurePreview() {

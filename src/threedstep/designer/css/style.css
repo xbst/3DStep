@@ -786,6 +786,9 @@ html, body {
   bottom: 52px;
   z-index: 6;
   transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
   max-width: calc(100% - 24px);
   padding: 5px 12px;
   border: 1px solid var(--accent);
@@ -794,10 +797,15 @@ html, body {
   color: var(--text);
   font-size: 12px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   pointer-events: none;
 }
+.vp-prompt-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The part a click would hit: it keeps its room when the text is cut short. */
+.vp-prompt-target { flex: none; display: flex; align-items: center; gap: 4px; max-width: 20em; color: var(--accent-hover); font-weight: 600; }
+.vp-prompt-target svg { flex: none; width: 13px; height: 13px; }
+.vp-prompt-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.vp-prompt-id { flex: none; color: var(--text-dim); font-family: var(--mono-font); font-size: 10px; font-weight: 400; }
+.vp-prompt-id:empty { display: none; }
 .vp-readout {
   position: absolute;
   top: 0;

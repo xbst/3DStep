@@ -21,7 +21,7 @@
 
 import { GizmoTools } from "./tools/gizmo.js";
 import { ExplodeTools } from "./tools/explode.js";
-import { AnnotateTools } from "./tools/annotate.js";
+import { AnnotateTools, ANNOTATE_ICONS } from "./tools/annotate.js";
 import { CameraTools } from "./tools/camera.js";
 
 const SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
@@ -82,7 +82,11 @@ export class Viewport {
       `<button class="toolbar-btn" data-act="open">Open project</button></div>` +
       `</div>` +
       `<div class="vp-busy" id="vp-busy" hidden></div>` +
-      `<div class="vp-prompt" id="vp-prompt" role="status" hidden></div>` +
+      // The target is the part a click would hit; it changes with every
+      // pointer move, so it is not announced.
+      `<div class="vp-prompt" id="vp-prompt" role="status" hidden><span class="vp-prompt-text"></span>` +
+      `<span class="vp-prompt-target" aria-hidden="true" hidden>${ANNOTATE_ICONS.pick}` +
+      `<span class="vp-prompt-name"></span><span class="vp-prompt-id"></span></span></div>` +
       `<div class="vp-readout" id="vp-readout" aria-live="off" hidden></div>` +
       `<div class="vp-drop">Drop STEP, GLB or project files</div>`;
     this.viewerEl = el.querySelector("#vp-viewer");
@@ -90,6 +94,9 @@ export class Viewport {
     this.emptyEl = el.querySelector("#vp-empty");
     this.busyEl = el.querySelector("#vp-busy");
     this.promptEl = el.querySelector("#vp-prompt");
+    this.promptTextEl = this.promptEl.querySelector(".vp-prompt-text");
+    this.promptTargetEl = this.promptEl.querySelector(".vp-prompt-target");
+    this._promptTarget = "";
     this.readoutEl = el.querySelector("#vp-readout");
     this.groups = {};
     for (const g of this.toolbar.querySelectorAll(".vp-group")) this.groups[g.dataset.group] = g;
@@ -550,7 +557,19 @@ export class Viewport {
   // Text the active tool asks the user for (empty hides it).
   setPrompt(text) {
     this.promptEl.hidden = !text;
-    this.promptEl.textContent = text || "";
+    this.promptTextEl.textContent = text || "";
+  }
+
+  // The part the active tool would hit, after the prompt's text: its name,
+  // and its id when that differs, as the Parts tree shows them (no name
+  // removes it).
+  setPromptTarget(name, id = "") {
+    const key = name ? `${name}\n${id}` : "";
+    if (key === this._promptTarget) return;
+    this._promptTarget = key;
+    this.promptTargetEl.hidden = !name;
+    this.promptTargetEl.querySelector(".vp-prompt-name").textContent = name || "";
+    this.promptTargetEl.querySelector(".vp-prompt-id").textContent = name && id !== name ? id : "";
   }
 
   // A value readout beside the pointer (client coordinates) while dragging.
