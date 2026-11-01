@@ -238,16 +238,17 @@ export class ProjectState {
 
   _restore(snap) {
     this._isRestoring = true;
-    const modelsChanged = !!snap.models;
+    const listBefore = JSON.stringify(this.project.assembly.models);
     this.project = Project.fromData(snap.project);
     this.sourceText = snap.sourceText ?? null;
-    if (modelsChanged) {
-      this.models = new Map(snap.models.map);
-      this.registry = buildRegistry(this.loadedModels());
-    }
+    // The loaded models change with a model snapshot, or with a models list
+    // the TOML tab edited: the registry describes loadedModels() either way.
+    const modelsChanged = !!snap.models || JSON.stringify(this.project.assembly.models) !== listBefore;
+    if (snap.models) this.models = new Map(snap.models.map);
+    if (modelsChanged) this.registry = buildRegistry(this.loadedModels());
     this.currentStep = snap.currentStep;
-    this.selection = snap.selection;
     this._clampStep();
+    this.selection = this._validSelection(snap.selection);
     this._origin = "undo";
     if (modelsChanged) this.emit("models-changed", { origin: "undo" });
     this.emit("project-changed", { origin: "undo", change: { kind: "full" } });
@@ -296,17 +297,18 @@ export class ProjectState {
     this._pushUndo(!!models);
     const stepBefore = this.currentStep;
     const selBefore = JSON.stringify(this.selection);
+    const listBefore = JSON.stringify(this.project.assembly.models);
     this.project = next;
-    if (models) {
-      this.models = models.map;
-      this.registry = buildRegistry(this.loadedModels());
-    }
+    // A models list edited in the TOML tab changes the loaded models too.
+    const modelsChanged = !!models || JSON.stringify(next.assembly.models) !== listBefore;
+    if (models) this.models = models.map;
+    if (modelsChanged) this.registry = buildRegistry(this.loadedModels());
     if (currentStep !== undefined) this.currentStep = currentStep;
     this._clampStep();
     if (this.currentStep !== stepBefore) this.selection = { ...this.selection, arrow: -1, label: -1 };
     this.selection = this._validSelection(selection || this.selection);
     this._origin = origin;
-    if (models) this.emit("models-changed", { origin });
+    if (modelsChanged) this.emit("models-changed", { origin });
     this.emit("project-changed", { origin, change });
     if (this.currentStep !== stepBefore) this.emit("step-changed", { index: this.currentStep, origin });
     if (JSON.stringify(this.selection) !== selBefore) this.emit("selection-changed", { selection: this.selection });
