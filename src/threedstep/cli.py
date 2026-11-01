@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -30,6 +31,33 @@ def _error(message: object, code: int = 1) -> None:
     for line in str(message).splitlines() or [""]:
         print(f"Error: {line}", file=sys.stderr)
     sys.exit(code)
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    """Whether two paths name one existing file. Comparing the paths would miss
+    a case variant, a short name or a link on Windows; samefile does not."""
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _render_inputs(project_path: Path, theme_name: str) -> list[tuple[str, Path]]:
+    """The files a render reads that an output path must not replace: the
+    project, every model it names, and the theme file, if one was found."""
+    from .config import _BUNDLED_THEMES, load_project
+
+    project = load_project(project_path)
+    inputs = [("the project file", project_path)]
+    inputs += [("a model it names", (project_path.parent / m).resolve())
+               for m in project.assembly.models]
+    # The same search load_theme makes: the project's theme_dir, then the bundled themes.
+    name = theme_name or project.assembly.theme
+    inputs += [("the theme file", p) for p in (
+        (project_path.parent / project.assembly.theme_dir).resolve() / f"{name}.toml",
+        _BUNDLED_THEMES / f"{name}.toml",
+    ) if name]
+    return inputs
 
 
 def _serve_designer(port: int, open_browser: bool) -> None:
@@ -58,6 +86,11 @@ def _render(args: argparse.Namespace) -> None:
         print(f"Warning: {warning}", file=sys.stderr)
 
     out_path: Path = args.output or project_path.with_suffix(".3dstep.html")
+    # build_page has read every input already, so writing over one would succeed
+    # and silently destroy the author's project, model or theme.
+    for what, source in _render_inputs(project_path, args.theme or ""):
+        if _same_file(out_path, source):
+            _error(f"the output would overwrite {what}: {source}")
     # Write LF explicitly. Text mode translates to CRLF on Windows, so the same
     # project rendered on two machines would produce two different files, and
     # the designer (which always writes LF) would disagree with the CLI.
@@ -85,7 +118,7 @@ def _convert(args: argparse.Namespace) -> None:
     # The name the designer gives the same import, so a project it wrote finds
     # the GLB this regenerates.
     out_path: Path = args.output or step_path.with_name(stepconv.glb_name_for(step_path))
-    if out_path.resolve() == step_path:
+    if _same_file(out_path, step_path):
         _error(f"the output would overwrite the STEP file: {step_path}")
     try:
         result = stepconv.write(
