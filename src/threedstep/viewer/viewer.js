@@ -1343,6 +1343,10 @@
           part.meshes.forEach(function (m) { m.material = mat; });
         } else {
           var fill = cssColor(part.cls === "highlight" ? tokens.highlightFill : tokens.partFill);
+          // A ghost has no edges, and the part fill is the view's own color
+          // in most themes (white on white): halfway to the edge color, it
+          // shows as a translucent silhouette.
+          if (part.cls === "ghost") fill.lerp(cssColor(tokens.partEdge), 0.5);
           if (!part.fadeMat) part.fadeMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
           part.fadeMat.color.copy(fill);
           part.fadeMat.opacity = part.alpha * (part.cls === "ghost" ? tokens.ghostOpacity : 1);
