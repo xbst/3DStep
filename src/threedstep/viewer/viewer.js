@@ -2140,6 +2140,23 @@
       if (handle.onStep) { try { handle.onStep(i, states[i]); } catch (e) { /* ignore */ } }
       requestRender();
     }
+    // No steps: the panel says so, and every part shows assembled and
+    // unhighlighted, without arrows or labels, as the boot leaves a project
+    // without steps (goToStep has no step to apply).
+    function showNoSteps() {
+      current = -1;
+      played = false;
+      container.classList.remove("is-played");
+      if (stateTween) { removeTween(stateTween); stateTween = null; }
+      if (playTween) { removeTween(playTween); playTween = null; }
+      renderPanelStep(-1);
+      clearArrows();
+      clearLabels();
+      partList.forEach(function (part) {
+        snapPart(part, { offset: new THREE.Vector3(), quat: new THREE.Quaternion(), pivotCenter: part.center.clone(), alpha: 1, visible: true, cls: "normal" });
+      });
+      requestRender();
+    }
 
     // ── Input ────────────────────────────────────────────────────────
     function on(target, type, fn, opts) {
@@ -2446,7 +2463,8 @@
       renderPanelStatic();
       var i = clamp(current < 0 ? 0 : current, 0, Math.max(0, states.length - 1));
       current = -1;
-      goToStep(i, { animate: false });
+      if (states.length) goToStep(i, { animate: false });
+      else { showNoSteps(); if (!keepCamera && webgl) setCameraNow(homeCamera()); }
       if (keepCamera && camBefore && webgl) setCameraNow(camBefore);
     }
     function setModels(models) {
@@ -2461,7 +2479,8 @@
         renderPanelStatic();
         var i = clamp(current < 0 ? 0 : current, 0, Math.max(0, states.length - 1));
         current = -1;
-        goToStep(i, { animate: false });
+        if (states.length) goToStep(i, { animate: false });
+        else showNoSteps();
         setCameraNow(camBefore);
       }).catch(fail);
     }
@@ -2586,6 +2605,7 @@
       showFallback(STR.noWebgl, e.message, true);
       goToStep(initialRef, { animate: false });
       if (stepIndex(initialRef) < 0) goToStep(0, { animate: false });
+      if (!states.length) showNoSteps();
       handle.ready = true;
       container.classList.add("tds-ready");
       if (handle.onReady) { try { handle.onReady(handle); } catch (err) { /* ignore */ } }
@@ -2605,7 +2625,7 @@
       if (i < 0) i = 0;
       current = -1;
       if (states.length) goToStep(i, { animate: false });
-      else { setCameraNow(homeCamera()); renderPanelStep(-1); }
+      else { setCameraNow(homeCamera()); showNoSteps(); }
       render();
       updateLabels();
       handle.ready = true;
