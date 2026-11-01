@@ -326,6 +326,9 @@ export class PartsPanel {
       this.tree.focus({ preventScroll: true });
     };
     input.addEventListener("keydown", (e) => {
+      // Ctrl+S goes on to the designer's save, which commits the name first
+      // (the field loses focus) and keeps the browser's Save Page away.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") return;
       e.stopPropagation();
       if (e.key === "Enter") finish(true);
       else if (e.key === "Escape") finish(false);

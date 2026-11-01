@@ -556,11 +556,15 @@ function init() {
   redoBtn.addEventListener("click", redo);
 
   document.addEventListener("keydown", (e) => {
-    // A dialog is on top: its keys are its own, and the project must not
-    // change behind it.
-    if (e.defaultPrevented || document.querySelector(".modal-backdrop")) return;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     const mod = e.ctrlKey || e.metaKey;
+    // A dialog is on top: its keys are its own, and the project must not
+    // change behind it. Ctrl+S still never reaches the browser's Save Page.
+    if (e.defaultPrevented) return;
+    if (document.querySelector(".modal-backdrop")) {
+      if (key === "s" && mod) e.preventDefault();
+      return;
+    }
     const active = document.activeElement;
     const typing = active && (active.matches("input, textarea, select") || active.isContentEditable);
     if (key === "s" && mod) {
