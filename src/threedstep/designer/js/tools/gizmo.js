@@ -3,8 +3,9 @@
 // group about their combined center, and each gets the move that shows it
 // there (geometry.composePlacement). While dragging, the viewer previews the
 // placements (previewPlacement, no scene rebuild); on release one
-// state.setMoves commits them (one undo step per drag). Shift snaps to 1 mm
-// and 5 degrees; a readout follows the pointer.
+// state.setMoves commits them (one undo step per drag); Escape mid-drag puts
+// the parts back. Shift snaps to 1 mm and 5 degrees; a readout follows the
+// pointer.
 
 import { DEG, composePlacement, isIdentityQuat, isZero, quatAxisAngle, roundTo, snapQuat, snapVector, vdot, vsub } from "./geometry.js";
 import { mergeEntries, pivotOf, unitsFor } from "./placement.js";
@@ -51,7 +52,12 @@ export class GizmoTools {
       deactivate: () => { this.mode = null; this._detach(); },
       // A click on a gizmo handle is the gizmo's: it must not change the selection.
       onPick: () => !!(this.tc && (this.tc.dragging || this.tc.axis)),
-      cancel: () => false,
+      // Escape mid-drag puts the parts back and keeps the tool; else it leaves.
+      cancel: () => {
+        if (!this._abortDrag()) return false;
+        this._attach();
+        return true;
+      },
     };
   }
 
@@ -83,6 +89,7 @@ export class GizmoTools {
   // The viewer was recreated (a theme change): start over with its new canvas.
   _rebuild() {
     if (this.tc) {
+      this._abortDrag();
       try { this.tc.detach(); this.tc.dispose(); } catch (e) { /* ignore */ }
       this.tc = null;
       this.helper = null;
@@ -120,6 +127,7 @@ export class GizmoTools {
 
   _detach() {
     if (!this.tc) return;
+    this._abortDrag();
     this.tc.detach();
     this.tc.enabled = false;
     this.vp.viewer.editor.requestRender();
@@ -128,6 +136,7 @@ export class GizmoTools {
   _onDragging(on) {
     const ed = this.vp.viewer.editor;
     const orbit = ed.controls();
+    if (on === this.dragging) return;   // the echo of an aborted drag
     this.dragging = on;
     if (on) {
       this.last = null;
@@ -138,6 +147,36 @@ export class GizmoTools {
       this.vp.el.classList.remove("is-dragging");
       this._commit();
     }
+  }
+
+  // End the drag in progress without committing it: the parts go back where
+  // they were. Escape calls it, and so does anything that detaches the gizmo
+  // mid-drag (TransformControls ignores the release once disabled, so its
+  // "dragging-changed" would never come). True when there was a drag.
+  _abortDrag() {
+    if (!this.dragging) return false;
+    const orbit = this.vp.viewer.editor.controls();
+    this.dragging = false;
+    this.last = null;
+    if (orbit) {
+      // Orbiting resumes once the button is up: the rest of a press that
+      // began on a handle must not turn the view.
+      const was = this._orbitWas !== false;
+      const resume = () => {
+        window.removeEventListener("pointerup", resume, true);
+        window.removeEventListener("pointercancel", resume, true);
+        orbit.enabled = was;
+      };
+      window.addEventListener("pointerup", resume, true);
+      window.addEventListener("pointercancel", resume, true);
+    }
+    this.vp.el.classList.remove("is-dragging");
+    this.vp.hideReadout();
+    if (this.P) this._preview([0, 0, 0], [0, 0, 0, 1]);
+    // The controls' own drag state too; its "dragging-changed" is ignored above.
+    this.tc.dragging = false;
+    this.tc.axis = null;
+    return true;
   }
 
   // The delta of the drag in progress: the pivot's position and rotation
@@ -155,12 +194,18 @@ export class GizmoTools {
       this.pivot.position.set(this.P[0] + translate[0], this.P[1] + translate[1], this.P[2] + translate[2]);
       this.pivot.quaternion.set(rotate[0], rotate[1], rotate[2], rotate[3]);
     }
+    const results = this._preview(translate, rotate);
+    this.last = { translate, rotate, results };
+    this.vp.showReadout(this._readout(translate, rotate), this.pointer.x, this.pointer.y);
+  }
+
+  // Show every unit moved by a delta about the pivot; returns the placements.
+  _preview(translate, rotate) {
     const delta = { pivot: this.P, translate, rotate };
     const results = this.units.map((u) => ({ unit: u, next: composePlacement(u.current, delta, u.center) }));
     const viewer = this.vp.viewer;
     for (const r of results) viewer.previewPlacement(r.unit.id, { offset: r.next.offset, rotate: r.next.rotate });
-    this.last = { translate, rotate, results };
-    this.vp.showReadout(this._readout(translate, rotate), this.pointer.x, this.pointer.y);
+    return results;
   }
 
   _readout(translate, rotate) {
