@@ -53,8 +53,10 @@ export class ProjectState {
   constructor() {
     this.project = new Project();
     this.models = new Map();        // file name -> Model (SPEC 13.1)
-    this.modelBytes = new Map();    // file name -> the GLB's bytes as opened or last saved, while unchanged
-    this.dirtyModels = new Set();   // models not yet saved as they are (imported ones included)
+    // file name -> the Model on disk under that name (as opened, attached or
+    // last saved). Undo never touches it: a model is dirty when the one in the
+    // project is not the one on disk, however it got there.
+    this._onDisk = new Map();
     this.registry = buildRegistry([]);
     this.currentStep = -1;
     this.selection = emptySelection();
@@ -63,7 +65,7 @@ export class ProjectState {
     this.sourceText = null;
     this.themes = [];               // [{name, display}] from the bridge
     this.runtimeBytes = DEFAULT_RUNTIME_BYTES;
-    this._glbCache = new WeakMap();
+    this._glbCache = new WeakMap();   // Model -> its GLB: the bytes it was opened or saved as, else as written
     this._listeners = new Map();
     this._origin = null;
     this._undoStack = [];
@@ -142,17 +144,28 @@ export class ProjectState {
   pageSize() {
     let total = this.runtimeBytes;
     for (const model of this.loadedModels()) {
-      const bytes = this.modelBytes.get(model.name);
+      const bytes = this._glbCache.get(model);
       total += Math.ceil((bytes ? bytes.length : estimateGlbSize(model)) / 3) * 4;
     }
     return total;
   }
 
-  // The GLB bytes of a model: as opened while unchanged (so Generate inlines
-  // what is on disk), else freshly written.
+  // Models not saved as they are: imported ones, changed ones, and ones an
+  // undo or redo brought back after a Save wrote another version.
+  get dirtyModels() {
+    const out = new Set();
+    for (const [name, model] of this.models) if (this._onDisk.get(name) !== model) out.add(name);
+    return out;
+  }
+
+  // The bytes a model was opened or saved as stay its GLB: Models never change.
+  _rememberBytes(model, bytes) {
+    if (model && bytes) this._glbCache.set(model, bytes);
+  }
+
+  // The GLB bytes of a model: as opened or saved while unchanged (so Generate
+  // inlines what is on disk), else freshly written.
   glbBytes(name) {
-    const bytes = this.modelBytes.get(name);
-    if (bytes) return bytes;
     const model = this.models.get(name);
     if (!model) return null;
     let out = this._glbCache.get(model);
@@ -202,7 +215,7 @@ export class ProjectState {
       sourceText: this.sourceText,
       selection: JSON.parse(JSON.stringify(this.selection)),
       currentStep: this.currentStep,
-      models: withModels ? { map: new Map(this.models), bytes: new Map(this.modelBytes), dirty: new Set(this.dirtyModels) } : null,
+      models: withModels ? { map: new Map(this.models) } : null,
     };
   }
 
@@ -229,8 +242,6 @@ export class ProjectState {
     this.sourceText = snap.sourceText ?? null;
     if (modelsChanged) {
       this.models = new Map(snap.models.map);
-      this.modelBytes = new Map(snap.models.bytes);
-      this.dirtyModels = new Set(snap.models.dirty);
       this.registry = buildRegistry(this.loadedModels());
     }
     this.currentStep = snap.currentStep;
@@ -287,8 +298,6 @@ export class ProjectState {
     this.project = next;
     if (models) {
       this.models = models.map;
-      this.modelBytes = models.bytes;
-      this.dirtyModels = models.dirty;
       this.registry = buildRegistry(this.loadedModels());
     }
     if (currentStep !== undefined) this.currentStep = currentStep;
@@ -314,12 +323,13 @@ export class ProjectState {
   // no history; "open" is one undo step.
   loadProject(project, { models = new Map(), bytes = new Map(), origin = "open", sourceText = null } = {}) {
     if (!this._prepareMutation(origin)) return false;
-    const state = { map: new Map(models), bytes: new Map(bytes), dirty: new Set() };
+    const state = { map: new Map(models) };
+    // The opened files are what is on disk from now on.
+    this._onDisk = new Map(state.map);
+    for (const [name, model] of state.map) this._rememberBytes(model, bytes.get(name));
     if (origin === "init") {
       this.project = project;
       this.models = state.map;
-      this.modelBytes = state.bytes;
-      this.dirtyModels = state.dirty;
       this.registry = buildRegistry(this.loadedModels());
       this.sourceText = sourceText;
       this.currentStep = project.steps.length ? 0 : -1;
@@ -342,8 +352,8 @@ export class ProjectState {
   // Add models opened beside a project (matched by file name), without an undo step of their own.
   attachModel(name, model, bytes) {
     this.models.set(name, model);
-    if (bytes) this.modelBytes.set(name, bytes);
-    this.dirtyModels.delete(name);
+    this._onDisk.set(name, model);
+    this._rememberBytes(model, bytes);
     this.registry = buildRegistry(this.loadedModels());
     this.selection = this._validSelection(this.selection);
     this.emit("models-changed", { origin: "open" });
@@ -751,7 +761,7 @@ export class ProjectState {
   // ── Models ─────────────────────────────────────────────────────────
 
   _modelState() {
-    return { map: new Map(this.models), bytes: new Map(this.modelBytes), dirty: new Set(this.dirtyModels) };
+    return { map: new Map(this.models) };
   }
 
   // A newly imported model (or an opened GLB, with its bytes): added to the
@@ -775,9 +785,7 @@ export class ProjectState {
     }
     const models = this._modelState();
     models.map.set(name, named);
-    models.bytes.delete(name);
-    if (bytes) models.bytes.set(name, bytes);
-    models.dirty.add(name);
+    this._rememberBytes(named, bytes);
     const ok = this._commit(origin, next, { kind: "full" }, { models, currentStep: current });
     return ok ? name : null;
   }
@@ -789,8 +797,6 @@ export class ProjectState {
     for (const [name, model] of Object.entries(changes)) {
       if (!models.map.has(name)) continue;
       models.map.set(name, model);
-      models.bytes.delete(name);
-      models.dirty.add(name);
     }
     return this._commit(origin, this.project.clone(), { kind: "models" }, { models });
   }
@@ -811,8 +817,6 @@ export class ProjectState {
         doomed = m.nodes.filter(n => n.mesh < 0 && !n.children.length).map(n => n.id);
       }
       models.map.set(name, m);
-      models.bytes.delete(name);
-      models.dirty.add(name);
     }
     if (!gone.size) return false;
     const next = this.project.clone();
@@ -845,8 +849,6 @@ export class ProjectState {
     const folds = this.folds();
     const models = this._modelState();
     models.map.set(name, merged);
-    models.bytes.delete(name);
-    models.dirty.add(name);
     const reg = buildRegistry(this.project.assembly.models.filter(n => models.map.has(n)).map(n => models.map.get(n)));
     const next = this.project.clone();
     const swap = list => {
@@ -889,8 +891,10 @@ export class ProjectState {
   // After Save: these models are on disk as written.
   markModelsSaved(saved) {
     for (const [name, bytes] of Object.entries(saved)) {
-      this.dirtyModels.delete(name);
-      if (bytes) this.modelBytes.set(name, bytes);
+      const model = this.models.get(name);
+      if (!model) continue;
+      this._onDisk.set(name, model);
+      this._rememberBytes(model, bytes);
     }
     this.emit("dirty-changed", {});
   }
