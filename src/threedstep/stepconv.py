@@ -16,14 +16,21 @@ gives the same tree, ids, labels, colors and primitives in both. The
 triangles can differ: occt-import-js is built on OpenCascade 7.6 and these
 wheels on 8.0, and the two meshers do not always split a face the same way.
 A project TOML works with either GLB, but the bytes are not the same.
+
+``3dstep split assembly.step`` (:func:`split`) cuts an assembly too big for
+the designer's reader into several STEP files by top-level component, each
+one assembly holding its components where the source has them, so the
+designer imports the files as models of one project that line up.
 """
 from __future__ import annotations
 
+import difflib
 import io
 import math
 import os
 import re
 import tempfile
+import tomllib
 from array import array
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -34,10 +41,13 @@ from OCP.BRep import BRep_Tool
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.IFSelect import IFSelect_ReturnStatus
+from OCP.Interface import Interface_Static
 from OCP.Message import Message, Message_Gravity, Message_PrinterOStream
+from OCP.OCP.collections import Sequence_TDF_Label
 from OCP.Precision import Precision
 from OCP.Quantity import Quantity_Color
-from OCP.STEPCAFControl import STEPCAFControl_Reader
+from OCP.STEPCAFControl import STEPCAFControl_Reader, STEPCAFControl_Writer
+from OCP.STEPControl import STEPControl_StepModelType
 from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDF import TDF_ChildIterator, TDF_Label
@@ -47,9 +57,10 @@ from OCP.TopExp import TopExp_Explorer
 from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import TopoDS, TopoDS_Shape
 from OCP.UnitsMethods import UnitsMethods_LengthUnit
-from OCP.XCAFDoc import XCAFDoc_ColorTool, XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool
+from OCP.XCAFDoc import (XCAFDoc_ColorTool, XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_Editor,
+                         XCAFDoc_ShapeTool)
 
-from . import __version__, glb
+from . import __version__, config, glb
 
 GENERATOR = f"stepconv {__version__}"
 
@@ -155,6 +166,22 @@ def _is_mesh_node(label) -> bool:
     return not any(_is_free_shape(child) for child in _children(label))
 
 
+def _body_shapes(shape):
+    """A mesh node's bodies, as occt-import-js finds them in its located
+    shape: its solids, then its shells outside a solid, then None for the
+    faces outside a shell, if any (one body, read from the shape itself)."""
+    explorer = TopExp_Explorer(shape, TopAbs_SOLID)
+    while explorer.More():
+        yield explorer.Current()
+        explorer.Next()
+    explorer = TopExp_Explorer(shape, TopAbs_SHELL, TopAbs_SOLID)
+    while explorer.More():
+        yield explorer.Current()
+        explorer.Next()
+    if TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SHELL).More():
+        yield None
+
+
 class _Reader:
     """One read: the document's shape tool and the bodies found so far."""
 
@@ -169,20 +196,10 @@ class _Reader:
     def node(self, label) -> dict:
         node = {"name": _label_name(label), "meshes": [], "children": []}
         if _is_mesh_node(label):
+            # The located shape, so every body arrives in world coordinates.
             shape = XCAFDoc_ShapeTool.GetShape_s(label)
-            # The located shape, so every body arrives in world coordinates:
-            # its solids, then its shells outside a solid, then one body of
-            # the faces outside a shell.
-            explorer = TopExp_Explorer(shape, TopAbs_SOLID)
-            while explorer.More():
-                node["meshes"].append(self.body(explorer.Current()))
-                explorer.Next()
-            explorer = TopExp_Explorer(shape, TopAbs_SHELL, TopAbs_SOLID)
-            while explorer.More():
-                node["meshes"].append(self.body(explorer.Current()))
-                explorer.Next()
-            if TopExp_Explorer(shape, TopAbs_FACE, TopAbs_SHELL).More():
-                node["meshes"].append(self.body(shape, standalone=True))
+            for body in _body_shapes(shape):
+                node["meshes"].append(self.body(shape, standalone=True) if body is None else self.body(body))
         else:
             node["children"] = [self.node(child) for child in _children(label)
                                 if _is_free_shape(child)]
@@ -305,7 +322,31 @@ def _quiet_messages():
                 said.append(line)
 
 
-def _read(data: bytes, linear_deflection: float, angular_deflection: float, ratio: bool) -> dict:
+@contextmanager
+def _reading(path: Path):
+    """Collect OpenCascade's messages while the block reads ``path``, and
+    raise a ValueError naming the file, with why when that is known, for a
+    file it cannot read."""
+    with _quiet_messages() as said:
+        try:
+            yield
+            return
+        except _Unreadable as e:
+            reason = str(e)
+        except Exception as e:
+            # OpenCascade can also fail while meshing or walking the document.
+            # OCP raises its failures as classes of its own modules, each
+            # deriving from Exception directly (not from Standard_Failure).
+            if type(e).__module__.split(".")[0] != "OCP":
+                raise
+            reason = str(e) or type(e).__name__
+    reason = reason or " ".join(said[-3:])
+    raise ValueError(f"{path.name} could not be read as a STEP file" + (f": {reason}" if reason else ""))
+
+
+def _read_document(data: bytes):
+    """A STEP file's bytes as a new XCAF document in millimeters, with the
+    file's names, colors and layers."""
     document = TDocStd_Document(TCollection_ExtendedString("XmlXCAF"))
     # Millimeters, whatever unit the file uses.
     XCAFDoc_DocumentTool.SetLengthUnit_s(document, 1.0, UnitsMethods_LengthUnit.UnitsMethods_LengthUnit_Millimeter)
@@ -320,7 +361,11 @@ def _read(data: bytes, linear_deflection: float, angular_deflection: float, rati
         raise _Unreadable(str(e)) from None
     if not transferred:
         raise _Unreadable("")
+    return document
 
+
+def _read(data: bytes, linear_deflection: float, angular_deflection: float, ratio: bool) -> dict:
+    document = _read_document(data)
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     XCAFDoc_DocumentTool.ColorTool_s(document.Main())
     free = [label for label in _children(shape_tool.Label()) if _is_free_shape(label)]
@@ -354,21 +399,9 @@ def read_step(path: str | Path, *, linear_deflection: float = 0.001, angular_def
     """
     path = Path(path)
     data = path.read_bytes()
-    with _quiet_messages() as said:
-        try:
-            return _read(data, linear_deflection, angular_deflection,
-                         ratio=linear_deflection_type != "absolute_value")
-        except _Unreadable as e:
-            reason = str(e)
-        except Exception as e:
-            # OpenCascade can also fail while meshing or walking the document.
-            # OCP raises its failures as classes of its own modules, each
-            # deriving from Exception directly (not from Standard_Failure).
-            if type(e).__module__.split(".")[0] != "OCP":
-                raise
-            reason = str(e) or type(e).__name__
-    reason = reason or " ".join(said[-3:])
-    raise ValueError(f"{path.name} could not be read as a STEP file" + (f": {reason}" if reason else ""))
+    with _reading(path):
+        return _read(data, linear_deflection, angular_deflection,
+                     ratio=linear_deflection_type != "absolute_value")
 
 
 # ── Building the model (the designer's buildModel) ───────────────────
@@ -641,3 +674,321 @@ def write(path_in: str | Path, path_out: str | Path, **options) -> ConvertResult
         raise OSError(f"cannot write output file: {path_out}: {e.strerror or e}") from None
     return ConvertResult(parts=len(model.meshes), triangles=sum(m.triangles for m in model.meshes),
                          size=len(data))
+
+
+# ── Splitting (3dstep split) ─────────────────────────────────────────
+
+_SPLIT_KEYS = ("file",)
+_SPLIT_FILE_KEYS = ("name", "assembly", "take")
+
+
+@dataclass
+class Component:
+    """A product among an assembly's top-level components, as ``3dstep split
+    --list`` prints it: its name, its instances, and the bodies they hold."""
+    name: str
+    instances: int
+    bodies: int
+
+
+@dataclass
+class SplitFile:
+    """A ``[[file]]`` of a split spec: the STEP file to write, the name of the
+    assembly written into it, and the products it takes (``"*"``: every
+    product no other file names). ``spec`` and ``index`` place it in messages."""
+    name: str
+    assembly: str
+    take: list[str]
+    spec: str = ""
+    index: int = 0
+
+    @property
+    def where(self) -> str:
+        return f"{self.spec}: [[file]] #{self.index}"
+
+
+@dataclass
+class SplitResult:
+    """A file :func:`split` wrote: its path, its assembly's name, the
+    component instances it holds, and its size in bytes."""
+    path: Path
+    assembly: str
+    components: int
+    size: int
+
+
+def load_split_spec(path: str | Path) -> list[SplitFile]:
+    """Load a split spec: a TOML file of ``[[file]]`` tables, each with a
+    ``name`` (the STEP file to write), an ``assembly`` (the name of the
+    assembly written into it, which the designer's ids come from) and a
+    ``take`` list (product names, or ``"*"`` for the rest).
+
+    Checks what can be checked without the assembly and raises
+    ``ValueError("<file>: [[file]] #N: <message>")``, as the project loader
+    does: unknown keys, missing ones, two files with one name, two assemblies
+    whose names give one id, a product taken twice. :func:`split` checks the
+    names against the assembly's components.
+    """
+    path = Path(path)
+    fname = path.name
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        raw = tomllib.loads(data.decode("utf-8-sig"))
+    except UnicodeDecodeError as e:
+        raise ValueError(f"{fname} is not UTF-8 text: {e}") from None
+    except tomllib.TOMLDecodeError as e:
+        raise ValueError(f"invalid TOML in {fname}: {e}") from None
+    unknown = sorted(k for k in raw if k not in _SPLIT_KEYS)
+    if unknown:
+        raise ValueError(f"{fname}: unknown top-level key(s) or table(s): {', '.join(unknown)} "
+                         "(valid: [[file]])")
+    tables = config._tables(raw.get("file", []), fname, "file")
+    if not tables:
+        raise ValueError(f"{fname}: no [[file]] tables: write one for each STEP file to make")
+
+    files: list[SplitFile] = []
+    names: dict[str, int] = {}          # file name, lowercased -> its [[file]]
+    ids: dict[str, int] = {}            # the id an assembly name gives -> its [[file]]
+    taken: dict[str, int] = {}          # product -> the [[file]] that takes it
+    for i, table in enumerate(tables):
+        n = i + 1
+        where = f"{fname}: [[file]] #{n}"
+        config._check_keys(table, _SPLIT_FILE_KEYS, where)
+        for key in _SPLIT_FILE_KEYS:
+            if key not in table:
+                config._fail(where, f"missing required key '{key}'")
+
+        name = config._text(table["name"], where, "name")
+        if "/" in name or "\\" in name or Path(name).suffix.lower() not in (".step", ".stp"):
+            config._fail(where, f"name must be a file name ending in .step or .stp, without a folder "
+                                f"(got {name!r}; -o gives the folder)")
+        # Lowercased: Windows and macOS would write both names to one file.
+        if name.lower() in names:
+            config._fail(where, f"name '{name}' is also the name of [[file]] #{names[name.lower()]}")
+        names[name.lower()] = n
+
+        assembly = config._text(table["assembly"], where, "assembly")
+        if not assembly.strip():
+            config._fail(where, "assembly must not be empty: the designer's ids come from it")
+        # The designer names a model's root node after its assembly, so two
+        # files with one assembly name would give their models one root id,
+        # and the designer would prefix every id of the later one.
+        root_id = glb.slugify(assembly)
+        if root_id in ids:
+            config._fail(where, f"assembly '{assembly}' gives the id '{root_id}', as the assembly of "
+                                f"[[file]] #{ids[root_id]} does: give each file its own assembly name "
+                                "(the designer would prefix every id of the later model)")
+        ids[root_id] = n
+
+        take = table["take"]
+        if not isinstance(take, list) or not take or not all(isinstance(t, str) for t in take):
+            config._fail(where, "take must be a list of component names like [\"Fan\"], or [\"*\"] "
+                                f"for every component no other file takes (got {take!r})")
+        for product in take:
+            if take.count(product) > 1:
+                config._fail(where, f"take lists '{product}' twice")
+            if product in taken:
+                if product == "*":
+                    config._fail(where, f"take: '*' is also in [[file]] #{taken[product]}: one file "
+                                        "takes the rest")
+                config._fail(where, f"take: '{product}' is already taken by [[file]] #{taken[product]}")
+        taken.update((product, n) for product in take)
+        files.append(SplitFile(name=name, assembly=assembly, take=list(take), spec=fname, index=n))
+    return files
+
+
+def _component_name(label) -> str:
+    """What a split calls a top-level component: its product's name, else
+    the instance's own."""
+    name = _label_name(label)
+    if not name and XCAFDoc_ShapeTool.IsReference_s(label):
+        attribute = TDataStd_Name()
+        if label.FindAttribute(TDataStd_Name.GetID_s(), attribute):
+            name = TCollection_AsciiString(attribute.Get()).ToCString()
+    return name
+
+
+def _read_components(path: Path):
+    """Read a STEP assembly to split it: (the document, the root assembly's
+    name, its top-level components as (name, label) in document order). A
+    file of several top-level shapes has no root: its shapes are the
+    components and the name is None; a file of one part has none. The
+    labels live in the document, so keep it while they are used."""
+    data = path.read_bytes()
+    with _reading(path):
+        document = _read_document(data)
+        shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+        free = [label for label in _children(shape_tool.Label()) if _is_free_shape(label)]
+        if not free:
+            raise _Unreadable("it holds no shapes")
+    if len(free) > 1:
+        return document, None, [(_component_name(label), label) for label in free]
+    labels = Sequence_TDF_Label()
+    XCAFDoc_ShapeTool.GetComponents_s(free[0], labels, False)
+    components = [labels.Value(i) for i in range(1, labels.Length() + 1)]
+    return document, _label_name(free[0]), [(_component_name(label), label) for label in components]
+
+
+def list_components(path: str | Path) -> tuple[str | None, list[Component]]:
+    """The products among a STEP assembly's top-level components, in document
+    order, with their instances and bodies: the names a split spec's
+    ``take`` lists. Returned with the root assembly's name, which is None for
+    a file of several top-level shapes (its shapes are the components); a
+    file of one part has no components. Raises ValueError for a file
+    OpenCascade cannot read."""
+    # The labels live in the document, which stays referenced until this returns.
+    document, root, components = _read_components(Path(path))
+    products: dict[str, Component] = {}
+    for name, label in components:
+        product = products.setdefault(name, Component(name=name, instances=0, bodies=0))
+        product.instances += 1
+        product.bodies += sum(1 for _ in _body_shapes(XCAFDoc_ShapeTool.GetShape_s(label)))
+    return root, list(products.values())
+
+
+def _default_files(products: list[str]) -> list[SplitFile]:
+    """One file per product, named by the id rule (``Fan Shroud`` gives
+    ``fan_shroud.step``) and holding an assembly named after the product, so
+    no two files' ids collide: a product whose id another one has gets the
+    same numbered suffix in its file and assembly names."""
+    files = []
+    for name, file_id in zip(products, glb.assign_ids(products)):
+        base = name or "part"
+        slug = glb.slugify(base)
+        assembly = base if slug == file_id else f"{base} {file_id[len(slug) + 1:]}"
+        files.append(SplitFile(name=f"{file_id}.step", assembly=assembly, take=[name]))
+    return files
+
+
+def _plan(files: list[SplitFile], components: list) -> tuple[list, list[str]]:
+    """Each file with the labels of the components it takes, in document
+    order, and the warnings (products no file takes). Raises ValueError for
+    a name ``take`` lists that is not a top-level component, one line each,
+    and for a ``"*"`` left with nothing to take."""
+    products = list(dict.fromkeys(name for name, _ in components))
+    known = set(products)
+    errors = []
+    for f in files:
+        for name in f.take:
+            if name != "*" and name not in known:
+                near = difflib.get_close_matches(name, products, n=3, cutoff=0.6)
+                hint = f"nearest: {', '.join(near)}" if near else "3dstep split --list names them"
+                errors.append(f"{f.where}: take: '{name}' is not a top-level component ({hint})")
+    if errors:
+        raise ValueError("\n".join(errors))
+
+    named = {name for f in files for name in f.take if name != "*"}
+    plan = []
+    for f in files:
+        rest = "*" in f.take
+        labels = [label for name, label in components if name in f.take or (rest and name not in named)]
+        if not labels:
+            raise ValueError(f"{f.where}: take: '*' takes nothing: the other files take every component")
+        plan.append((f, labels))
+    warnings = []
+    left = [name for name in products if name not in named]
+    if left and not any("*" in f.take for f in files):
+        warnings.append(f"{files[0].spec}: no [[file]] takes {', '.join(repr(n) for n in left)}, so the "
+                        "split leaves " + ("it" if len(left) == 1 else "them") + " out (add \"*\" to a "
+                        "file's take to keep every component no other file takes)")
+    return plan, warnings
+
+
+def _write_assembly(labels, assembly: str) -> bytes:
+    """A STEP file holding the components ``labels`` as the components of one
+    new assembly named ``assembly``, each at its place in the source (its
+    location under the source's root), with its names, colors and layers."""
+    document = TDocStd_Document(TCollection_ExtendedString("XmlXCAF"))
+    XCAFDoc_DocumentTool.SetLengthUnit_s(document, 1.0, UnitsMethods_LengthUnit.UnitsMethods_LengthUnit_Millimeter)
+    shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
+    root = shape_tool.NewShape()
+    # isMultiByte: the name arrives as UTF-8.
+    TDataStd_Name.Set_s(root, TCollection_ExtendedString(assembly, True))
+    sequence = Sequence_TDF_Label()
+    for label in labels:
+        sequence.Append(label)
+    # One assembly for them all, not a file per part: the designer meshes each
+    # top-level shape with a deflection relative to its size, so the parts
+    # are meshed as in the source, where a small part alone would be meshed
+    # far finer.
+    if not XCAFDoc_Editor.Extract_s(sequence, root, False):
+        raise ValueError(f"the components of '{assembly}' could not be copied")
+    shape_tool.UpdateAssemblies()
+
+    saved = Interface_Static.IVal_s("write.surfacecurve.mode")
+    # No 2D curves (PCURVEs) on the edges: the reader computes them where a
+    # file has none (Fusion's exports have none), and they would double the
+    # entities the designer's reader must hold.
+    Interface_Static.SetIVal_s("write.surfacecurve.mode", 0)
+    try:
+        writer = STEPCAFControl_Writer()
+        writer.SetColorMode(True)
+        writer.SetNameMode(True)
+        writer.SetLayerMode(True)
+        stream = io.BytesIO()
+        written = (writer.Transfer(document, STEPControl_StepModelType.STEPControl_AsIs)
+                   and writer.ChangeWriter().WriteStream(stream) == IFSelect_ReturnStatus.IFSelect_RetDone)
+    finally:
+        Interface_Static.SetIVal_s("write.surfacecurve.mode", saved)
+    if not written:
+        raise ValueError(f"the assembly '{assembly}' could not be written as STEP")
+    return stream.getvalue()
+
+
+def split(path_in: str | Path, out_dir: str | Path, spec: list[SplitFile] | None = None
+          ) -> tuple[list[SplitResult], list[str]]:
+    """Split a STEP assembly into several STEP files by top-level component.
+
+    Each ``[[file]]`` of ``spec`` (from :func:`load_split_spec`) gets every
+    instance of the products it takes, in document order, as the components
+    of one new assembly named by its ``assembly``, each where the source has
+    it and with its names and colors; without a spec, each product gets a
+    file of its own. The designer then imports the files as models of one
+    project that line up, with ids that do not collide. The edges are
+    written without their 2D curves, so a file is about its share of the
+    source's size.
+
+    Returns the files written, in the spec's order, and warnings (products
+    no file takes). Raises ValueError for a file that cannot be read or has
+    no components, for names ``take`` lists that are not components, and
+    for an output that would overwrite ``path_in``; OSError for a file or
+    folder that cannot be written.
+    """
+    path_in, out_dir = Path(path_in), Path(out_dir)
+    # The labels live in the document, which stays referenced until this returns.
+    document, _root, components = _read_components(path_in)
+    if not components:
+        raise ValueError(f"{path_in.name} has no components to split: it holds one part")
+    files = spec if spec is not None else _default_files(list(dict.fromkeys(n for n, _ in components)))
+    plan, warnings = _plan(files, components)
+    for f, _labels in plan:
+        try:
+            # samefile, as write() does: a case variant or a short name is the same file.
+            same = os.path.samefile(path_in, out_dir / f.name)
+        except OSError:
+            same = False
+        if same:
+            where = f"{f.where}: " if f.spec else ""
+            raise ValueError(f"{where}the output would overwrite the STEP file: {path_in}")
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OSError(f"cannot create the output folder: {out_dir}: {e.strerror or e}") from None
+
+    results = []
+    with _quiet_messages():
+        for f, labels in plan:
+            try:
+                data = _write_assembly(labels, f.assembly)
+            except Exception as e:
+                if type(e).__module__.split(".")[0] != "OCP":
+                    raise
+                raise ValueError(f"{f.name} could not be written: {str(e) or type(e).__name__}") from None
+            out = out_dir / f.name
+            try:
+                out.write_bytes(data)
+            except OSError as e:
+                raise OSError(f"cannot write output file: {out}: {e.strerror or e}") from None
+            results.append(SplitResult(path=out, assembly=f.assembly, components=len(labels), size=len(data)))
+    return results, warnings

@@ -2,8 +2,9 @@
 
 The positional argument picks the mode: none opens the designer, a ``.toml``
 project renders a page, a ``.step`` / ``.stp`` model converts to a GLB (with the
-optional ``3dstep[step]`` dependency). Flags that belong to another mode are
-usage errors rather than silently ignored.
+optional ``3dstep[step]`` dependency). ``3dstep split`` first splits a STEP
+assembly into several (also with the extra), with a parser of its own. Flags
+that belong to another mode are usage errors rather than silently ignored.
 """
 from __future__ import annotations
 
@@ -20,6 +21,16 @@ modes:
   3dstep                  open the designer in a browser
   3dstep assembly.toml    render assembly.toml to assembly.3dstep.html
   3dstep model.step       convert model.step to model.glb (needs 3dstep[step])
+  3dstep split big.step   split big.step into STEP files the designer can
+                          import (needs 3dstep[step]; see 3dstep split --help)
+"""
+
+_SPLIT_SPEC = """\
+the spec is TOML, one [[file]] table per STEP file to write:
+  [[file]]
+  name = "board.step"         # the file, written in OUT_DIR
+  assembly = "Board"          # its assembly: the model's top group, its own per file
+  take = ["Main board"]       # products from --list; "*" takes the rest
 """
 
 _QUALITIES = ("fine", "normal", "coarse")
@@ -290,8 +301,119 @@ def _check_convert_values(parser: argparse.ArgumentParser, args: argparse.Namesp
                      f"_, . and -, so the ids stay valid: got {args.id_prefix!r}")
 
 
+# ── 3dstep split ─────────────────────────────────────────────────────
+
+def _build_split_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="3dstep split",
+        description="Split a STEP assembly into several STEP files by top-level component, each\n"
+                    "one assembly holding its components where the source has them, so the\n"
+                    "designer imports an assembly too big for it as the models of one project.\n"
+                    "Needs the optional dependency: pip install \"3dstep[step]\".",
+        epilog=_SPLIT_SPEC,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "file",
+        type=Path,
+        metavar="assembly.step",
+        help="The STEP assembly to split (.step or .stp).",
+    )
+    parser.add_argument(
+        "-o", "--output",
+        type=Path,
+        default=None,
+        metavar="OUT_DIR",
+        help="The folder to write the files in, made if missing.  Defaults to the "
+             "assembly's folder.",
+    )
+    parser.add_argument(
+        "--spec",
+        type=Path,
+        default=None,
+        metavar="SPLIT.toml",
+        help="Which components go into which file (see below).  Without it, each "
+             "product among the top-level components gets a file named after it.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="Print the top-level components (instances, bodies and product, in "
+             "document order) and write nothing.",
+    )
+    return parser
+
+
+def _print_components(step_name: str, root: str | None, components: list) -> None:
+    if not components:
+        print(f"{step_name}: '{root}' is one part, with no components to split")
+        return
+    total = sum(c.instances for c in components)
+    holder = f"assembly '{root}'" if root is not None else "no root assembly"
+    print(f"{step_name}: {holder}, {total} top-level component{'s' * (total != 1)} "
+          f"of {len(components)} product{'s' * (len(components) != 1)}")
+    print(f"{'instances':>9}  {'bodies':>6}  product")
+    for c in components:
+        print(f"{c.instances:>9}  {c.bodies:>6}  {c.name or '(no name)'}")
+
+
+def _split(argv: list[str]) -> None:
+    parser = _build_split_parser()
+    args = parser.parse_args(argv)
+    if args.file.suffix.lower() not in (".step", ".stp"):
+        parser.error("expected a .step or .stp assembly to split")
+    if args.list:
+        flags = [name for name, given in (("--output", args.output is not None),
+                                          ("--spec", args.spec is not None)) if given]
+        if flags:
+            parser.error(f"{_verb(flags, 'applies', 'apply')} only to writing the files, "
+                         "which --list does not do")
+    try:
+        from . import stepconv
+    except ImportError:
+        _error('Splitting a STEP file needs the optional dependency: pip install "3dstep[step]"')
+
+    step_path: Path = args.file.resolve()
+    if not step_path.is_file():
+        _error(f"STEP file not found: {step_path}")
+    if args.list:
+        try:
+            root, components = stepconv.list_components(step_path)
+        except MemoryError:
+            _error(f"out of memory while reading {step_path.name}")
+        except (ValueError, OSError) as e:
+            _error(e)
+        _print_components(step_path.name, root, components)
+        return
+
+    spec = None
+    if args.spec is not None:
+        spec_path: Path = args.spec.resolve()
+        if not spec_path.is_file():
+            _error(f"spec file not found: {spec_path}")
+        try:
+            spec = stepconv.load_split_spec(spec_path)
+        except (ValueError, OSError) as e:
+            _error(e)
+    out_dir: Path = args.output if args.output is not None else step_path.parent
+    if out_dir.exists() and not out_dir.is_dir():
+        _error(f"the output is a file, not a folder: {out_dir}")
+    try:
+        results, warnings = stepconv.split(step_path, out_dir, spec)
+    except MemoryError:
+        _error(f"out of memory while splitting {step_path.name}")
+    except (ValueError, OSError) as e:
+        _error(e)
+    for warning in warnings:
+        print(f"Warning: {warning}", file=sys.stderr)
+    for r in results:
+        print(f"Wrote {r.path}  ({r.assembly}: {r.components} component{'s' * (r.components != 1)}, "
+              f"{r.size / 1048576:.2f} MB)")
+
+
 def main(argv: list[str] | None = None) -> None:
-    """The ``3dstep`` command: open the designer, render a project, or convert a model."""
+    """The ``3dstep`` command: open the designer, render a project, convert a
+    model, or split an assembly."""
     # A piped stdout on Windows (a CI log, `> log.txt`) gets the ANSI code page
     # with strict errors, so printing a path it cannot encode (a CJK folder)
     # would fail after the page was written. Escape such characters instead,
@@ -299,6 +421,12 @@ def main(argv: list[str] | None = None) -> None:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(errors="backslashreplace")
+    argv = sys.argv[1:] if argv is None else list(argv)
+    # A mode of its own with its own flags. "split" can never be a project or
+    # a model to open, which need their suffix.
+    if argv[:1] == ["split"]:
+        _split(argv[1:])
+        return
     parser = _build_parser()
     args = parser.parse_args(argv)
 
