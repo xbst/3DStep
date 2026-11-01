@@ -355,6 +355,11 @@
       } else if (sc && Array.isArray(sc.fit)) {
         cam = { kind: "fit", fit: expand(sc.fit, where + " camera fit"),
           fov: num(sc.fov, prevCam.fov), projection: sc.projection || prevCam.projection };
+        // The camera frames only the parts the step shows, as config.check_ids warns.
+        sc.fit.forEach(function (id) {
+          var m = reg.members[id];
+          if (m && m.length && !m.some(function (p) { return visible[p]; })) warnings.push(where + ": camera fit names '" + id + "', which is hidden");
+        });
       } else if (sc && (sc.fov != null || sc.projection)) {
         cam = Object.assign({}, prevCam, { fov: num(sc.fov, prevCam.fov), projection: sc.projection || prevCam.projection });
       } else {
@@ -1629,9 +1634,11 @@
     // What a camera frames for some ids (every part when `ids` is empty) in a
     // step's state `st`: the corners of each part's box where the step shows
     // it, and for a moved part where it lands too, so its arrow and its Play
-    // stay in view (a fit over an exploded step frames the explosion).
+    // stay in view (a fit over an exploded step frames the explosion). Only
+    // the parts the step shows count; when it shows none of the ids, every
+    // part it shows; when it shows nothing (or `st` is null), every part.
     function framePoints(ids, st) {
-      var placed = st ? st.placed : null;
+      var vis = st ? st.visible : null, placed = st ? st.placed : null;
       var listed = partList;
       if (ids && ids.length) {
         var seen = {};
@@ -1641,7 +1648,10 @@
           members.forEach(function (pid) { if (parts[pid] && !seen[pid]) { seen[pid] = true; listed.push(parts[pid]); } });
         });
       }
-      var chosen = listed.length ? listed : partList;
+      var shown = function (part) { return vis[part.id]; };
+      var chosen = vis ? listed.filter(shown) : listed;
+      if (!chosen.length && vis) chosen = partList.filter(shown);
+      if (!chosen.length) chosen = partList;
       var points = [];
       chosen.forEach(function (part) {
         var corners = boxCorners({ min: part.box.min.toArray(), max: part.box.max.toArray() });

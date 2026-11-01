@@ -622,8 +622,8 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
     listing the nearest existing ids, or one line per part that two
     ``[[step.move]]`` tables of a step reach (through a group). Appends warnings to ``project.warnings``:
     ``[[part]]`` tables for ids no model has, ids two models share, and steps
-    that highlight, ghost or move a part that is hidden in that step, or attach
-    an arrow or label to one.
+    that highlight, ghost, move or fit a part that is hidden in that step, or
+    attach an arrow or label to one.
     """
     fname = project.path.name
     missing = [m for m in project.assembly.models if m not in trees]
@@ -698,6 +698,12 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
             if parts and not visible.intersection(parts):
                 warnings.append(f"{where}: {key} names '{nid}', which is hidden in this "
                                 "step, so it will not be seen")
+        # The viewer's fit frames only the parts the step shows.
+        for nid in (step.camera.fit or []) if step.camera else []:
+            parts = nodes.parts_under(nid)
+            if parts and not visible.intersection(parts):
+                warnings.append(f"{where}: [step.camera] fit names '{nid}', which is hidden in "
+                                "this step, so the camera does not frame it")
 
 
 # ── Theme ────────────────────────────────────────────────────────────
