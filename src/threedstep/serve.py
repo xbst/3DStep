@@ -8,19 +8,56 @@ fetches its Python payload, so opening index.html from disk does not work.
 The designer's files are served at ``/`` and the viewer runtime (the same files
 a generated page inlines) at ``/viewer/``, since the designer's preview runs the
 viewer itself.
+
+The payload is checked against the package each time the designer asks for it,
+and rebuilt first if a source changed, so an edit to the package (the viewer, a
+theme, the renderer, the bridge) reaches the designer's Generate at its next
+page load without restarting the server.
 """
 from __future__ import annotations
 
+import io
 import socket
 import sys
+import threading
 import webbrowser
 from functools import partial
+from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from .payload import PAYLOAD_NAME, build_payload, designer_root, viewer_root
 
 _VIEWER_PREFIX = "/viewer"
+
+
+class _Payload:
+    """The payload as served, rebuilt first whenever the package has changed.
+
+    The designer fetches it once per page load, so checking every request
+    costs one digest of the package's sources (a few milliseconds) per load.
+    ``build_payload`` decides where, as it did at startup: beside the designer
+    in a source checkout, in the per-user cache for an installed package.
+
+    The check, a rebuild and the read happen under one lock, and the bytes are
+    sent from memory: two requests never build at once (the temporary file is
+    named after the process), and no thread has the zip open while another
+    replaces it, which Windows refuses.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.path = build_payload()
+        self.data = self.path.read_bytes()
+
+    def read(self) -> bytes:
+        with self._lock:
+            path = build_payload()
+            data = path.read_bytes()
+            if data != self.data:
+                print(f"Payload:   rebuilt, the package changed  ({len(data) / 1024:.0f} KB)", flush=True)
+            self.path, self.data = path, data
+            return data
 
 
 class _Handler(SimpleHTTPRequestHandler):
@@ -30,12 +67,12 @@ class _Handler(SimpleHTTPRequestHandler):
     modules change under anyone editing them, so a cached copy is always the
     wrong answer here.
 
-    The payload is served from wherever it was actually built, which is not
-    always inside the served directory: for an installed package it lives in
-    a per-user cache.
+    The payload is answered from memory (see _Payload), so it does not matter
+    that it is not always inside the served directory: for an installed
+    package it lives in a per-user cache.
     """
 
-    payload: Path | None = None
+    payload: _Payload | None = None
     viewer: Path | None = None
 
     # SimpleHTTPRequestHandler takes its content types from mimetypes, which on
@@ -61,21 +98,48 @@ class _Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store, must-revalidate")
         super().end_headers()
 
-    def translate_path(self, path: str) -> str:
+    def send_head(self):
+        if self.payload is None or not self._asks_for_payload():
+            return super().send_head()
+        try:
+            data = self.payload.read()
+        except OSError as e:
+            # Never the previous payload instead: Generate would quietly
+            # disagree with the command line, which is what the check is for.
+            print(f"Could not build the payload: {e}", file=sys.stderr, flush=True)
+            self.send_error(HTTPStatus.INTERNAL_SERVER_ERROR, "Could not build the payload", str(e))
+            return None
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", self.extensions_map[".zip"])
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        return io.BytesIO(data)
+
+    def _viewer_part(self, path: str) -> str | None:
+        """What follows ``/viewer`` in a request for the viewer runtime, else None."""
         bare = path.split("?", 1)[0].split("#", 1)[0]
         if self.viewer is not None and (bare == _VIEWER_PREFIX or bare.startswith(_VIEWER_PREFIX + "/")):
-            # Resolved by the base class against the viewer folder instead of
-            # the designer's, so it drops ".." the same way and cannot leave it.
-            served_dir = self.directory
-            self.directory = str(self.viewer)
-            try:
-                return super().translate_path(path[len(_VIEWER_PREFIX):] or "/")
-            finally:
-                self.directory = served_dir
-        served = super().translate_path(path)
-        if self.payload is not None and Path(served).name == PAYLOAD_NAME:
-            return str(self.payload)
-        return served
+            return path[len(_VIEWER_PREFIX):] or "/"
+        return None
+
+    def _asks_for_payload(self) -> bool:
+        # Any path outside /viewer/ that names the payload, as the designer's
+        # relative fetch does from the root.
+        return self._viewer_part(self.path) is None and \
+            Path(super().translate_path(self.path)).name == PAYLOAD_NAME
+
+    def translate_path(self, path: str) -> str:
+        rest = self._viewer_part(path)
+        if rest is None:
+            return super().translate_path(path)
+        # Resolved by the base class against the viewer folder instead of the
+        # designer's, so it drops ".." the same way and cannot leave it.
+        served_dir = self.directory
+        self.directory = str(self.viewer)
+        try:
+            return super().translate_path(rest)
+        finally:
+            self.directory = served_dir
 
     def log_message(self, fmt: str, *args) -> None:
         pass  # one line per asset is noise; errors still surface below
@@ -154,10 +218,10 @@ def serve(port: int = 0, *, open_browser: bool = True) -> None:
         raise ValueError(f"port must be between 0 and 65535, got {port}")
 
     root: Path = designer_root()
-    payload = build_payload()
+    payload = _Payload()
     print(f"Designer:  {root}")
-    print(f"Payload:   {payload}  ({payload.stat().st_size / 1024:.0f} KB)")
-    if payload.parent != root:
+    print(f"Payload:   {payload.path}  ({len(payload.data) / 1024:.0f} KB)")
+    if payload.path.parent != root:
         print("           (built in the user cache, outside the installed package)")
 
     bound = _pick_port(port)
