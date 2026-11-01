@@ -1825,7 +1825,9 @@
     // Fly from the current camera to `cam` over `ms` (0 snaps).
     // The flight's projection is `flightProjection`, so setProjection() can retarget a running flight.
     // A flight cut short by another still calls its `done`: the camera got somewhere.
-    var camTween = null, camDone = null, flightProjection = "orthographic";
+    // A zoom during a flight, which its next frame would undo, waits in `flightZoom` (dolly
+    // factors multiplied) and is applied where the flight ends, or where the one that cuts it ends.
+    var camTween = null, camDone = null, flightProjection = "orthographic", flightZoom = 1;
     function flyTo(cam, ms, done) {
       if (camTween) {
         removeTween(camTween);
@@ -1840,6 +1842,7 @@
       var switching = (projection === "perspective") !== (camera === cameraP);
       if (!(ms > 0) || reducedMotion() || switching) {
         setCameraNow(cam);
+        landFlightZoom();
         setFlying(false);
         if (done) done();
         return;
@@ -1861,9 +1864,16 @@
         camDone = null;
         controls.enabled = true;
         controls.update();
+        landFlightZoom();
         setFlying(false);
         if (done) done();
       });
+    }
+    // Apply the zoom kept during a flight, in the frame that ends it (dolly() requests the render).
+    function landFlightZoom() {
+      var f = flightZoom;
+      flightZoom = 1;
+      if (f !== 1) dolly(f);
     }
     function setFlying(v) {
       if (flying === v) return;
@@ -2650,6 +2660,7 @@
     }
     function dolly(factor) {
       if (!webgl) return;
+      if (camTween) { flightZoom *= factor; return; }
       if (camera === cameraO) {
         cameraO.zoom = clamp(cameraO.zoom / factor, controls.minZoom, controls.maxZoom);
         cameraO.updateProjectionMatrix();
@@ -2662,6 +2673,16 @@
       updateNearFar();
       requestRender();
     }
+    // The controls are off during a flight and drop the wheel: hand dolly() the zoom they would
+    // have made (OrbitControls' scale for the delta, its line and page units, a pinch's tenfold
+    // delta), about the target. An inactive viewer never sees a plain wheel (the capture above).
+    on(canvas, "wheel", function (e) {
+      if (!camTween || !controls.enableZoom) return;
+      e.preventDefault();
+      var dy = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1);
+      if (e.ctrlKey && !controls._controlActive) dy *= 10;
+      if (dy) dolly(Math.pow(0.95, controls.zoomSpeed * Math.abs(dy) * 0.01 * (dy > 0 ? -1 : 1)));
+    }, { passive: false });
     function resetView() {
       if (!webgl) return;
       flyTo(homeCamera(), behavior.transitionMs / 2, null);
