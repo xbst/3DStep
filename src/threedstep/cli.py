@@ -266,6 +266,13 @@ def _check_convert_values(parser: argparse.ArgumentParser, args: argparse.Namesp
 
 def main(argv: list[str] | None = None) -> None:
     """The ``3dstep`` command: open the designer, render a project, or convert a model."""
+    # A piped stdout on Windows (a CI log, `> log.txt`) gets the ANSI code page
+    # with strict errors, so printing a path it cannot encode (a CJK folder)
+    # would fail after the page was written. Escape such characters instead,
+    # as Python already does on stderr.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     parser = _build_parser()
     args = parser.parse_args(argv)
 
