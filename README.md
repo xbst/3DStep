@@ -1,5 +1,8 @@
 # 3DStep
 
+> [!NOTE]
+> 3DStep currently is in beta.
+
 Step-by-step interactive 3D assembly instructions for documentation sites. 3DStep turns a CAD assembly (STEP) into a page where each instruction shows the parts it installs, moves them into place with arrows and frames them from a good angle, and the reader can turn the model to look closer. It renders one self-contained HTML file you can open in a browser or embed in an MkDocs or Zensical site.
 
 ![A generated 3DStep page: stepping through a PiCAN 2 adapter going into its printed shell, each part playing into place, and the finished assembly turned to look closer](assets/3dstep-demo.gif)
