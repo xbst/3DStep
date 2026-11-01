@@ -208,8 +208,7 @@ export class EditorPanel {
       const { project, warnings } = parseProject(text);
       this._clearError();
       this.warnings = warnings;
-      this.state.setProjectFromEditor(project);
-      this.state.sourceText = text;
+      this.state.setProjectFromEditor(project, text);
       this.state.emit("source-synced", { text });
       return true;
     } catch (e) {

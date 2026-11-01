@@ -314,9 +314,15 @@ export class ProjectState {
     return true;
   }
 
-  // A new project from the TOML tab (its text already parsed).
-  setProjectFromEditor(project) {
-    return this._commit("editor", project, { kind: "full" });
+  // A new project from the TOML tab, with the text it was parsed from.
+  // Snapshots hold the text, so typing that changes only comments or layout
+  // is an undo step of its own: Undo takes back that typing, not the change
+  // before it.
+  setProjectFromEditor(project, text) {
+    const changed = this._commit("editor", project, { kind: "full" });
+    if (!changed && text !== this.sourceText) this._pushUndo(false);
+    this.sourceText = text;
+    return changed;
   }
 
   // Replace everything: an opened project, or the empty start. "init" keeps
