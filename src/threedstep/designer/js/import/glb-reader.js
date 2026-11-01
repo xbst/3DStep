@@ -422,7 +422,7 @@ export function readGlb(data, { name = "model.glb", units = "m", up = "y", targe
     }
   });
 
-  const flat = flattenForeign({ name, units: modelUnits, up: modelUp, generator: generator || (meta && meta.generator) || GENERATOR, nodes, meshes });
+  const flat = flattenForeign({ name, units: modelUnits, up: modelUp, generator: generator || GENERATOR, nodes, meshes });
   flat.stats = { source: { name, bytes: bytes.byteLength, kind, threedstep: !!meta }, warnings };
   return flat;
 }
