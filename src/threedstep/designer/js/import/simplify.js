@@ -1,9 +1,17 @@
 // Mesh simplification (SPEC 13.4) with meshoptimizer's simplifier. Each
-// primitive is simplified on its positions alone; the simplifier keeps the
-// original vertices and only drops triangles, so the kept vertices keep the
-// exact surface normals occt-import-js computed (recomputed by area-weighted
-// smoothing for a primitive that had none). Returns new meshes; the caller
-// replaces them in the model with undo.
+// primitive is simplified on its positions, with its normals weighed in as
+// attributes; the simplifier keeps the original vertices and only drops
+// triangles, so the kept vertices keep the exact surface normals
+// occt-import-js computed (recomputed by area-weighted smoothing for a
+// primitive that had none). Returns new meshes; the caller replaces them in
+// the model with undo.
+//
+// occt-import-js gives every B-rep face its own copy of the vertices on its
+// border. By default (permissive) a collapse may cross those borders;
+// otherwise the simplifier only slides vertices along them, which stops an
+// EDA board, whose parts are mostly small faces, at about a third of its
+// triangles. Either way both sides of a border move together, so no crack
+// opens; the normals make a collapse that would bend a crease cost more.
 
 import { MeshoptSimplifier } from "../../vendor/meshopt_simplifier.module.js";
 import { computeNormals, makeMesh, nodeIndex, partIndices } from "./model.js";
@@ -12,23 +20,30 @@ import { computeNormals, makeMesh, nodeIndex, partIndices } from "./model.js";
 // heading for the target ratio, which may stop the simplifier early.
 export const DEFAULT_ERROR = 0.01;
 
+// How much a normal's change counts against a collapse, per component.
+const NORMAL_WEIGHTS = [0.5, 0.5, 0.5];
+
 export function simplifierReady() {
   if (!MeshoptSimplifier.supported) return Promise.reject(new Error("mesh simplification needs WebAssembly"));
   return MeshoptSimplifier.ready;
 }
 
 // One primitive at `ratio` of its triangles. error is relative to the
-// primitive's extent, or millimeters with absolute: true. Returns
-// { primitive, error } with the error the simplifier reached (same unit).
-export function simplifyPrimitive(prim, { ratio = 0.5, error = DEFAULT_ERROR, absolute = false, lockBorder = false } = {}) {
+// primitive's extent, or millimeters with absolute: true; permissive: false
+// keeps every face border (see above). Returns { primitive, error } with the
+// error the simplifier reached (same unit).
+export function simplifyPrimitive(prim, { ratio = 0.5, error = DEFAULT_ERROR, absolute = false, lockBorder = false, permissive = true } = {}) {
   const triangles = prim.indices.length / 3;
   const target = Math.max(1, Math.floor(triangles * ratio)) * 3;
   if (target >= prim.indices.length || triangles < 4) return { primitive: prim, error: 0 };
   const flags = [];
   if (lockBorder) flags.push("LockBorder");
   if (absolute) flags.push("ErrorAbsolute");
+  if (permissive) flags.push("Permissive");
   const indices = prim.indices instanceof Uint32Array ? prim.indices : Uint32Array.from(prim.indices);
-  const [out, reached] = MeshoptSimplifier.simplify(indices, prim.positions, 3, target, error, flags);
+  const [out, reached] = prim.normals
+    ? MeshoptSimplifier.simplifyWithAttributes(indices, prim.positions, 3, prim.normals, 3, NORMAL_WEIGHTS, null, target, error, flags)
+    : MeshoptSimplifier.simplify(indices, prim.positions, 3, target, error, flags);
   if (!out.length || out.length >= prim.indices.length) return { primitive: prim, error: 0 };
 
   // Drop the vertices no triangle uses any more (compactMesh rewrites `out`).

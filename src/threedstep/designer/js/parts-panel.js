@@ -354,7 +354,7 @@ export class PartsPanel {
         for (const model of st.loadedModels()) {
           const ids = opts.scope === "selection" ? parts.filter((id) => st.registry.model.get(id) === model.name) : [];
           if (opts.scope === "selection" && !ids.length) continue;
-          const out = await simplifyModel(model, ids, { ratio: opts.ratio, error: opts.error });
+          const out = await simplifyModel(model, ids, { ratio: opts.ratio, error: opts.error, permissive: opts.permissive });
           before += out.before;
           after += out.after;
           if (out.after < out.before) changes[model.name] = out.model;

@@ -540,7 +540,7 @@ function importGlbDialog(file, { taken, up, last }) {
 
 // ── Simplify and tiny parts ─────────────────────────────────────────
 
-// Resolves to {ratio, error, scope: "selection" | "all"} or null.
+// Resolves to {ratio, error, permissive, scope: "selection" | "all"} or null.
 export function openSimplify({ selected = 0, triangles = 0 } = {}) {
   return new Promise((resolve) => {
     let result = null;
@@ -551,8 +551,10 @@ export function openSimplify({ selected = 0, triangles = 0 } = {}) {
       `<div class="form-grid">` +
       `<label for="simp-ratio">Target</label><span class="inline"><input id="simp-ratio" class="field-input" type="number" min="5" max="95" step="5" value="50"> % of the triangles</span>` +
       `<label for="simp-error">Error bound</label><span class="inline"><input id="simp-error" class="field-input" type="number" min="0.1" max="10" step="0.1" value="1"> % of each mesh's size</span>` +
+      `<label for="simp-permissive">Face borders</label><label class="check"><input id="simp-permissive" type="checkbox" checked> Simplify across the borders between faces</label>` +
+      `<span class="hint">Needed to get EDA parts, made of many small faces, much smaller; turn it off to keep every face's outline exact.</span>` +
       `<label>Parts</label><span class="inline">` +
-      `<label class="check"><input type="radio" name="simp-scope" value="selection"${selected ? " checked" : " disabled"}> The ${selected || "no"} selected</label>` +
+      `<label class="check"><input type="radio" name="simp-scope" value="selection"${selected ? " checked" : " disabled"}> ${selected ? `The ${formatCount(selected)} selected` : "The selection (none)"}</label>` +
       `<label class="check"><input type="radio" name="simp-scope" value="all"${selected ? "" : " checked"}> All (${formatCount(triangles)} triangles)</label></span>` +
       `</div>` +
       `<div class="modal-foot"><span class="spacer"></span><button class="toolbar-btn" data-act="cancel">Cancel</button>` +
@@ -562,7 +564,7 @@ export function openSimplify({ selected = 0, triangles = 0 } = {}) {
       const ratio = Math.min(95, Math.max(5, Number(body.querySelector("#simp-ratio").value) || 50)) / 100;
       const error = Math.min(10, Math.max(0.1, Number(body.querySelector("#simp-error").value) || 1)) / 100;
       const scope = body.querySelector('input[name="simp-scope"]:checked').value;
-      result = { ratio, error, scope };
+      result = { ratio, error, permissive: body.querySelector("#simp-permissive").checked, scope };
       close();
     });
     body.querySelector('[data-act="ok"]').focus();
