@@ -96,17 +96,26 @@ export function confirmDialog(title, message, { ok = "OK", danger = false } = {}
 
 // getToml returns the project TOML as it stands (the Theme dropdown edits it,
 // so each render reads it afresh), getModels the GLB bytes of every model,
-// stem the file name the download gets before ".3dstep.html".
-export async function openGenerate(state, { getToml, getModels, stem }) {
+// stem the file name the download gets before ".3dstep.html", openTheme(name)
+// asks for a theme file the project names but the designer was not given
+// (state emits "theme-files" once it has one).
+export async function openGenerate(state, { getToml, getModels, stem, openTheme = null }) {
   const { body, close, onClose } = openModal("Generate page", { size: "wide" });
-  const themes = runtime.isReady() ? await runtime.themeCatalog().catch(() => []) : [];
-  const current = state.project.assembly.theme || "default";
-  if (!themes.some((t) => t.name === current)) themes.push({ name: current, display: current });
+  // The bundled themes and those opened with the project; the project's own
+  // theme is listed even when it is neither, and its render says what to open.
+  let missingTheme = "";
+  const themeOptions = async () => {
+    const themes = runtime.isReady() ? await runtime.themeCatalog().catch(() => []) : [];
+    const current = state.project.assembly.theme || "default";
+    missingTheme = themes.some((t) => t.name === current) ? "" : current;
+    if (missingTheme) themes.push({ name: current, display: current });
+    return themes.map((t) => `<option value="${esc(t.name)}"${t.name === current ? " selected" : ""}>${esc(t.display)}</option>`).join("");
+  };
 
   body.innerHTML =
     `<div class="gen-bar">` +
     `<label class="gen-theme">Theme <select id="gen-theme">` +
-    themes.map((t) => `<option value="${esc(t.name)}"${t.name === current ? " selected" : ""}>${esc(t.display)}</option>`).join("") +
+    await themeOptions() +
     `</select></label>` +
     `<span class="gen-status" id="gen-status" role="status">Rendering…</span>` +
     `<span class="gen-spacer"></span>` +
@@ -175,9 +184,24 @@ export async function openGenerate(state, { getToml, getModels, stem }) {
       setOk(false);
       showWarnings([]);
       previewEl.innerHTML = `<pre class="gen-error">${esc(e && e.message ? e.message : e)}</pre>`;
+      const name = state.project.assembly.theme || "default";
+      if (openTheme && name === missingTheme) {
+        const open = document.createElement("button");
+        open.className = "toolbar-btn gen-open-theme";
+        open.textContent = `Open ${name}.toml`;
+        open.addEventListener("click", () => openTheme(name));
+        previewEl.appendChild(open);
+      }
       statusEl.textContent = "Failed";
     }
   };
+  // A theme file opened from here (or anywhere) joins the list and renders.
+  const onThemeFiles = async () => {
+    themeEl.innerHTML = await themeOptions();
+    refresh();
+  };
+  state.on("theme-files", onThemeFiles);
+  onClose(() => state.off("theme-files", onThemeFiles));
 
   // The dropdown is the project's theme, the same setting as the toolbar's.
   // Pending TOML that does not parse refuses the change: put it back.

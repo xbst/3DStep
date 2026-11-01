@@ -650,6 +650,9 @@ html, body {
   background: var(--bg);
   overflow: hidden;
 }
+/* What shows through a theme whose page and view are transparent (a docs
+   site's own, on its host's background): a host page in the preview's scheme. */
+:root[data-theme="light"] .viewport { background: #ffffff; }
 
 /* The viewer root: fills the viewport (viewer.css gives .tds.is-editor its height),
    in its own stacking context so the start screen and the toolbar cover its HUD. */
@@ -1086,6 +1089,8 @@ html, body {
 }
 .gen-preview iframe { width: 100%; height: 100%; border: 0; display: block; }
 .gen-error { margin: 0; padding: 12px; color: var(--danger); font-size: 12px; white-space: pre-wrap; background: var(--bg); min-height: 100%; }
+.gen-preview:has(.gen-open-theme) .gen-error { min-height: 0; }
+.gen-open-theme { margin: 0 12px 12px; }
 .gen-note { margin: 10px 0 0; font-size: 11px; color: var(--text-dim); }
 .gen-warn {
   margin: 0 0 10px;

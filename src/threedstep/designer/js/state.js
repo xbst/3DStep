@@ -65,10 +65,12 @@ export class ProjectState {
     // comments and formatting with the data (PinConnect's sourceText).
     this.sourceText = null;
     // The file the project was opened from or last saved as: its name without
-    // .toml ("" before the first save) and the TOML text it holds. Snapshots
-    // keep this object, not a copy: undoing an Open brings back the previous
-    // project's file, and a save updates it for every undo step of the project.
-    this.file = { name: "", savedText: null };
+    // .toml ("" before the first save), the TOML text it holds, and the theme
+    // files opened with it (file name -> bytes: a docs site's own theme and
+    // its fonts, never saved). Snapshots keep this object, not a copy:
+    // undoing an Open brings back the previous project's file and themes, and
+    // a save updates it for every undo step of the project.
+    this.file = { name: "", savedText: null, themes: new Map() };
     this.themes = [];               // [{name, display}] from the bridge
     this.runtimeBytes = DEFAULT_RUNTIME_BYTES;
     this._glbCache = new WeakMap();   // Model -> its GLB: the bytes it was opened or saved as, else as written
@@ -338,10 +340,10 @@ export class ProjectState {
 
   // Replace everything: an opened project, or the empty start. "init" keeps
   // no history; "open" is one undo step. The project's file becomes fileName
-  // (without .toml), holding sourceText.
-  loadProject(project, { models = new Map(), bytes = new Map(), origin = "open", sourceText = null, fileName = "" } = {}) {
+  // (without .toml), holding sourceText, with the theme files opened with it.
+  loadProject(project, { models = new Map(), bytes = new Map(), origin = "open", sourceText = null, fileName = "", themes = new Map() } = {}) {
     if (!this._prepareMutation(origin)) return false;
-    const file = { name: fileName, savedText: sourceText };
+    const file = { name: fileName, savedText: sourceText, themes: new Map(themes) };
     const state = { map: new Map(models) };
     // The opened files are what is on disk from now on.
     this._onDisk = new Map(state.map);

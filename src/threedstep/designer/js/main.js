@@ -8,7 +8,7 @@ import { PartsPanel } from "./parts-panel.js";
 import { StepsPanel } from "./steps-panel.js";
 import { InspectorPanel } from "./inspector-panel.js";
 import { Viewport } from "./viewport.js";
-import { parseProject, serializeProject } from "./toml-io.js";
+import { parseProject, parseToml, serializeProject } from "./toml-io.js";
 import * as runtime from "./runtime.js";
 import {
   downloadFile, esc, formatBytes, formatCount, maybeShowAboutOnFirstVisit, openAbout, openGenerate, openImport, openModal,
@@ -56,18 +56,121 @@ async function loadThemes(viewport) {
   await applyThemeTokens(viewport);
 }
 
+// The bridge resolves the theme as the 3dstep command does: the theme files
+// opened with the project, written where its theme_dir points, then the
+// bundled themes. The preview's tokens depend on all three.
 let tokensFor = null;
+let themeFilesVersion = 0;
 async function applyThemeTokens(viewport) {
-  const name = state.project.assembly.theme || "default";
-  if (!runtime.isReady() || tokensFor === name) return;
-  tokensFor = name;
+  const { theme, theme_dir: themeDir } = state.project.assembly;
+  const name = theme || "default";
+  const key = `${name}\n${themeDir}\n${themeFilesVersion}`;
+  if (!runtime.isReady() || tokensFor === key) return;
+  tokensFor = key;
+  let tokens;
   try {
-    viewport.setTheme(await runtime.themeTokens(name));
+    tokens = await runtime.themeTokens(name, themeDir);
   } catch (e) {
-    // A theme the browser cannot see (a project theme_dir): the preview uses
-    // the default look; Generate says so too.
-    viewport.setTheme(await runtime.themeTokens("default").catch(() => null));
+    // A theme neither bundled nor opened with the project: the preview uses
+    // the default look, and a banner offers to open the theme file.
+    tokens = await runtime.themeTokens("default").catch(() => null);
   }
+  if (tokensFor === key) viewport.setTheme(tokens);
+}
+
+// ── Theme files opened with the project ─────────────────────────────
+//
+// A docs site keeps its own theme beside its projects (theme_dir), which the
+// designer cannot read. It takes the theme's TOML, and any font file the theme
+// names, opened or dropped with the project instead: they live on state.file,
+// so opening another project drops them and undoing that Open brings them
+// back, and the bridge writes them where theme_dir points. They are never
+// changed or saved.
+
+const THEME_TABLES = ["theme", "colors", "font", "behavior", "extra_css"];
+const FONT_FILE = /\.(woff2?|ttf|otf)$/i;
+
+// A theme rather than a project: theme tables and no [assembly]. A file that
+// does not parse opens as a project, which shows its error.
+function isThemeToml(text) {
+  try {
+    const value = parseToml(text);
+    return !("assembly" in value) && THEME_TABLES.some((key) => key in value);
+  } catch (_) {
+    return false;
+  }
+}
+
+// The .toml files among those opened: projects as text (LF, as the editor, a
+// textarea, holds it, so an opened file is not "unsaved" at once), themes as
+// the bytes the command line would read.
+async function readTomls(files) {
+  const projects = [];
+  const themes = [];
+  for (const file of files) {
+    if (!/\.toml$/i.test(file.name)) continue;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const text = new TextDecoder().decode(bytes).replace(/\r\n?/g, "\n");
+    if (isThemeToml(text)) themes.push({ file, bytes });
+    else projects.push({ file, text });
+  }
+  return { projects, themes };
+}
+
+// The name a theme file is kept under: its own, or the project's theme when
+// that is its name in another case (the 3dstep command finds it so on Windows
+// and macOS) or when it was picked for that theme.
+function themeFileName(file, projectTheme, picked = false) {
+  const stem = file.name.replace(/\.toml$/i, "");
+  return picked || stem.toLowerCase() === projectTheme.toLowerCase() ? `${projectTheme}.toml` : file.name;
+}
+
+async function themeFileMap(themes, fonts, projectTheme, into = new Map(), pickedFor = "") {
+  const picked = pickedFor && !themes.some(({ file }) => themeFileName(file, pickedFor) === `${pickedFor}.toml`) ? themes[0] : null;
+  for (const theme of themes) {
+    const name = themeFileName(theme.file, pickedFor || projectTheme, theme === picked);
+    into.set(name, theme.bytes);
+    noteSpelling(name, theme.file.name);
+  }
+  for (const file of fonts) into.set(file.name, new Uint8Array(await file.arrayBuffer()));
+  return into;
+}
+
+// Theme and font files opened without a project (the theme banner's button,
+// Open, a drop): added to those of the project on screen.
+async function addThemeFiles(themes, fonts, pickedFor = "") {
+  await themeFileMap(themes, fonts, state.project.assembly.theme || "default", state.file.themes, pickedFor);
+  state.emit("theme-files", {});
+}
+
+// The bridge holds the theme files of the project on screen: an Open, an undo
+// or redo across one, or files added hand them over again, and the theme list
+// and the preview follow.
+let themeFilesShown = null;
+function syncThemeFiles(viewport, { force = false } = {}) {
+  if (!force && state.file.themes === themeFilesShown) return;
+  themeFilesShown = state.file.themes;
+  themeFilesVersion++;
+  runtime.setThemeFiles(themeFilesShown);
+  if (runtime.isReady()) loadThemes(viewport);
+}
+
+// The banner's button: a theme TOML for the project's theme, with its fonts.
+function pickThemeFor(name) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".toml,.woff2,.woff,.ttf,.otf";
+  input.multiple = true;
+  input.addEventListener("change", async () => {
+    const list = [...input.files];
+    const { projects, themes } = await readTomls(list);
+    if (projects.length && !themes.length) {
+      showBanner("open-error", `${esc(projects[0].file.name)} is not a theme: a theme file has [theme] or [colors] tables and no [assembly].`, { warn: true });
+      return;
+    }
+    await addThemeFiles(themes, list.filter((f) => FONT_FILE.test(f.name)), name);
+  });
+  input.click();
 }
 
 // ── Tabs and layout ─────────────────────────────────────────────────
@@ -248,9 +351,25 @@ function matchModelFiles(names, files) {
   return pairs;
 }
 
-// Files opened under another name than the project gives them: a model
-// matched in another case, or a file picked for a name. The status bar says
-// so, since the 3dstep command looks for the project's spelling.
+// A project whose theme is neither bundled nor opened with it (a docs site's
+// own theme, kept in its theme_dir): offer to open the theme file.
+function refreshThemeBanner() {
+  const { theme, theme_dir: themeDir } = state.project.assembly;
+  const name = theme || "default";
+  if (!state.themes.length || state.themes.some((t) => t.name === name)) {
+    hideBanner("theme");
+    return;
+  }
+  showBanner("theme",
+    `The project's theme, <code>${esc(name)}</code>, is not bundled with 3DStep: the 3dstep command reads ` +
+    `<code>${esc(name)}.toml</code> from <code>${esc(themeDir)}</code>, the project's theme_dir. ` +
+    "Open that file to preview and generate with the theme here.",
+    { warn: true, actions: [{ label: `Open ${name}.toml`, onClick: () => pickThemeFor(name) }] });
+}
+
+// Files opened under another name than the project gives them: a model or a
+// theme matched in another case, or a file picked for a name. The status bar
+// says so, since the 3dstep command looks for the project's spelling.
 let spellings = new Map();   // the name in the project -> the opened file's name
 function noteSpelling(name, fileName) {
   if (name.split("/").pop() !== fileName) spellings.set(name, fileName);
@@ -258,7 +377,7 @@ function noteSpelling(name, fileName) {
 }
 
 function spellingNote() {
-  const renamed = [...spellings].filter(([name]) => state.models.has(name));
+  const renamed = [...spellings].filter(([name]) => state.models.has(name) || state.file.themes.has(name));
   if (!renamed.length) return "";
   const lines = renamed.map(([name, fileName]) => {
     const want = name.split("/").pop();
@@ -409,13 +528,17 @@ async function importFiles(files, editorPanel, showTab) {
   }
 }
 
-// A project TOML with its GLB files (matched by file name, in any case); GLB
-// files alone fill in models the project names but has not loaded.
+// A project TOML with its GLB files (matched by file name, in any case) and
+// the theme and font files of a theme it reads from its own theme_dir; GLB,
+// theme and font files alone fill in what the project on screen names but
+// has not loaded.
 async function openFiles(files, editorPanel, showTab) {
   const list = [...files];
-  const toml = list.find((f) => /\.toml$/i.test(f.name));
   const glbs = list.filter((f) => /\.glb$/i.test(f.name));
-  if (!toml) {
+  const fonts = list.filter((f) => FONT_FILE.test(f.name));
+  const { projects, themes } = await readTomls(list);
+  if (!projects.length) {
+    if (themes.length || fonts.length) await addThemeFiles(themes, fonts);
     const pairs = matchModelFiles(state.missingModels(), glbs);
     for (const [name, file] of pairs) await attachGlb(file, name);
     const attached = new Set(pairs.values());
@@ -423,8 +546,7 @@ async function openFiles(files, editorPanel, showTab) {
     if (rest.length) await importFiles(rest, editorPanel, showTab);
     return;
   }
-  // LF, as the editor (a textarea) holds it, so an opened file is not "unsaved" at once.
-  const text = (await toml.text()).replace(/\r\n?/g, "\n");
+  const { file: toml, text } = projects[0];
   let parsed;
   try {
     parsed = parseProject(text);
@@ -452,7 +574,9 @@ async function openFiles(files, editorPanel, showTab) {
       problems.push(`${file.name}: ${e.message || e}`);
     }
   }
-  if (!state.loadProject(parsed.project, { models, bytes: bytesMap, origin: "open", sourceText: text, fileName: toml.name.replace(/\.toml$/i, "") })) {
+  const themeFiles = await themeFileMap(themes, fonts, parsed.project.assembly.theme || "default");
+  if (projects.length > 1) problems.push(`${projects.slice(1).map((p) => p.file.name).join(", ")} not opened: open one project at a time.`);
+  if (!state.loadProject(parsed.project, { models, bytes: bytesMap, origin: "open", sourceText: text, fileName: toml.name.replace(/\.toml$/i, ""), themes: themeFiles })) {
     spellings = before;
     return;
   }
@@ -476,7 +600,8 @@ function setupFileIO(editorPanel, viewport, showTab) {
   });
   document.getElementById("save-btn").addEventListener("click", () => saveProject(editorPanel));
 
-  // Drop on the viewport: a TOML opens a project, anything else imports.
+  // Drop on the viewport: a TOML opens a project or adds a theme (a font
+  // file adds to the theme), anything else imports.
   const vp = viewport.el;
   let depth = 0;
   const isFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
@@ -489,21 +614,21 @@ function setupFileIO(editorPanel, viewport, showTab) {
     depth = 0;
     vp.classList.remove("dragover");
     const files = [...e.dataTransfer.files];
-    const toml = files.find((f) => /\.toml$/i.test(f.name));
+    const opens = files.some((f) => /\.toml$/i.test(f.name) || FONT_FILE.test(f.name));
     // Name what the chosen path leaves out, so a drop never does nothing silently.
-    const skipped = toml
-      ? files.filter((f) => f !== toml && !/\.glb$/i.test(f.name))
+    const skipped = opens
+      ? files.filter((f) => !/\.(toml|glb)$/i.test(f.name) && !FONT_FILE.test(f.name))
       : files.filter((f) => !/\.(step|stp|glb|gltf)$/i.test(f.name));
     if (skipped.length) {
       showBanner("drop",
         `Skipped ${skipped.map((f) => `<code>${esc(f.name)}</code>`).join(", ")}: ` +
-        (toml ? `a drop with a project .toml opens <code>${esc(toml.name)}</code> and its .glb files only; drop .step, .stp, .glb or .gltf files on their own to import them.`
+        (opens ? "a drop with a .toml opens a project with its .glb files, and a theme with its font files; drop .step, .stp, .glb or .gltf files on their own to import them."
           : "drop .step, .stp, .glb or .gltf files to import models, or a project .toml with its .glb files."),
         { warn: true });
     } else {
       hideBanner("drop");
     }
-    if (toml) await openFiles(files, editorPanel, showTab);
+    if (opens) await openFiles(files, editorPanel, showTab);
     else if (files.every((f) => /\.glb$/i.test(f.name)) && state.missingModels().length) await openFiles(files, editorPanel, showTab);
     else await importFiles(files.filter((f) => /\.(step|stp|glb|gltf)$/i.test(f.name)), editorPanel, showTab);
   });
@@ -598,8 +723,18 @@ function init() {
   });
   setupResizers(viewport);
   setupFileIO(editorPanel, viewport, showTab);
+  // Before the Theme selector's listener, so the bridge has the opened
+  // project's theme files when the selector asks for its theme.
+  state.on("project-changed", () => syncThemeFiles(viewport));
+  state.on("theme-files", () => {
+    syncThemeFiles(viewport, { force: true });
+    scheduleValidation(editorPanel);
+    renderStatus();
+  });
   setupThemeSelect(viewport);
   setupStyleSelect();
+  state.on("themes-loaded", refreshThemeBanner);
+  state.on("project-changed", refreshThemeBanner);
 
   const undoBtn = document.getElementById("undo-btn");
   const redoBtn = document.getElementById("redo-btn");
@@ -706,6 +841,7 @@ function init() {
         return out;
       },
       stem: defaultStem(),
+      openTheme: pickThemeFor,
     });
   });
   document.getElementById("about-btn").addEventListener("click", openAbout);

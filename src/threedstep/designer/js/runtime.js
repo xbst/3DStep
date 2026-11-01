@@ -18,6 +18,10 @@ let _bridge = null;
 let _py = null;
 let _failure = null;
 const _listeners = [];
+// The theme files opened with the project ({file name: Uint8Array}), handed
+// to the bridge before the next call whenever they change.
+let _themeFiles = new Map();
+let _themesSent = true;
 
 /** Subscribe to boot progress. Phases: runtime, package, ready, error. */
 export function onProgress(cb) {
@@ -93,6 +97,7 @@ if "${PKG_DIR}" not in sys.path:
 
   _bridge = py.pyimport("bridge");
   _py = py;
+  _themesSent = false;
   emit("ready");
   return py;
 }
@@ -125,7 +130,28 @@ export function failure() {
 
 async function bridge() {
   await ready();
+  if (!_themesSent) {
+    _themesSent = true;
+    const proxy = _py.toPy(_themeFiles);
+    try {
+      _bridge.set_theme_files(proxy);
+    } finally {
+      proxy.destroy();
+    }
+  }
   return _bridge;
+}
+
+/**
+ * The theme TOMLs and font files opened with the project ({file name:
+ * Uint8Array}), replacing those set before. The bridge writes them where the
+ * project's theme_dir points before every call that resolves a theme, so the
+ * themes, the validation and Generate find them as the 3dstep command finds
+ * them on disk.
+ */
+export function setThemeFiles(files) {
+  _themeFiles = new Map(files);
+  _themesSent = false;
 }
 
 /** True once threedstep is importable, for callers that cannot await. */
@@ -163,14 +189,17 @@ async function call(name, ...args) {
 
 // ── Themes ──────────────────────────────────────────────────────────
 
-/** [{name, display}], default first. */
+/** [{name, display, project?}]: the bundled themes, default first, then those opened with the project. */
 export async function themeCatalog() {
   return JSON.parse(await call("theme_catalog"));
 }
 
-/** {name, light, dark, behavior, warnings} of a bundled theme. */
-export async function themeTokens(name) {
-  return JSON.parse(await call("theme_tokens", name || "default"));
+/**
+ * {name, light, dark, behavior, warnings} of a theme, found as for a project
+ * reading themeDir: a theme opened with the project first, then a bundled one.
+ */
+export async function themeTokens(name, themeDir = "./themes") {
+  return JSON.parse(await call("theme_tokens", name || "default", themeDir));
 }
 
 export async function version() {
