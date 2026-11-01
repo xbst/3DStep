@@ -1414,10 +1414,16 @@
       return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] };
     }
     // The concrete camera of a step: explicit, or fit/auto resolved from the
-    // previous step's direction (cached per step index).
+    // previous step's direction (cached per step index). Step 1 inherits the
+    // home view ([camera]), so a fit there looks from the home view's side.
     function resolveCamera(i) {
       if (camCache[i]) return camCache[i];
       var prevDir = defaultDir();
+      var home = scene.camera;
+      if (home && isVec3(home.position) && isVec3(home.target)) {
+        var homeDir = vsub(vec3(home.position), vec3(home.target));
+        if (vlen(homeDir) > 0) prevDir = vnorm(homeDir);
+      }
       for (var k = 0; k <= i; k++) {
         var spec = states[k] ? states[k].camera : null;
         var cam;
