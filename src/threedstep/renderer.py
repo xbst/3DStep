@@ -22,6 +22,7 @@ from .config import (
     Project,
     Theme,
     ThemeBehavior,
+    check_arrows,
     check_ids,
     load_models,
     load_project,
@@ -483,6 +484,7 @@ def build_page(path: Path, *, theme_name: str = "") -> Page:
     project = load_project(path)
     models = load_models(project)
     trees: dict[str, list] = {}
+    boxes: dict[str, dict | None] = {}
     model_warnings: list[str] = []
     parts = 0
     for name in project.assembly.models:
@@ -492,9 +494,11 @@ def build_page(path: Path, *, theme_name: str = "") -> Page:
             raise ValueError(f"{name}: {e}") from None
         model_warnings.extend(f"{name}: {w}" for w in glb.validate(doc))
         trees[name] = glb.tree(doc)
+        boxes[name] = glb.bbox(doc)
         parts += _count_parts(trees[name])
     check_ids(project, trees)
     theme = load_theme(theme_name or project.assembly.theme, path, project.assembly.theme_dir)
+    check_arrows(project, boxes, theme.behavior.arrow_scale)
     page = generate_html(project, models, theme=theme)
     warnings = model_warnings + project.warnings + theme.warnings + runtime_warnings()
     return Page(html=page, warnings=warnings, steps=len(project.steps), parts=parts)

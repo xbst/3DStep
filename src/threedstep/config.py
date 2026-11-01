@@ -706,6 +706,54 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
                                 "this step, so the camera does not frame it")
 
 
+def arrow_head_length(boxes: dict[str, dict | None], arrow_scale: float = 1.0) -> float:
+    """The length of the viewer's arrowheads in mm (SPEC 9.7): 3% of the
+    diagonal of the box around every model, kept to 2 to 20 mm, times the
+    theme's ``arrow_scale``. ``boxes`` maps each model to its bounding box,
+    ``{"min": [x, y, z], "max": [x, y, z]}`` as :func:`threedstep.glb.bbox`
+    returns it, or None for a model that draws nothing."""
+    lo, hi = [math.inf] * 3, [-math.inf] * 3
+    for box in boxes.values():
+        if box:
+            lo = [min(a, b) for a, b in zip(lo, box["min"])]
+            hi = [max(a, b) for a, b in zip(hi, box["max"])]
+    diagonal = math.dist(lo, hi) if lo[0] <= hi[0] else 0.0
+    return min(max(diagonal * 0.03, 2.0), 20.0) * arrow_scale
+
+
+def _apart(a: float, b: float) -> tuple[str, str]:
+    """Two lengths with the fewest decimals, one to three, that tell them apart."""
+    for digits in (1, 2, 3):
+        x, y = f"{a:.{digits}f}", f"{b:.{digits}f}"
+        if x != y:
+            break
+    return x, y
+
+
+def check_arrows(project: Project, boxes: dict[str, dict | None], arrow_scale: float = 1.0) -> None:
+    """Warn about explicit straight arrows the viewer will not draw.
+
+    The viewer drops a straight ``[[step.arrow]]`` shorter than its head,
+    whose length comes from the size of the models and the theme
+    (:func:`arrow_head_length`), so this needs the models' bounding boxes
+    (``boxes``, one per model the project names) and the theme's
+    ``arrow_scale``. Appends one warning per such arrow to
+    ``project.warnings``. An attached arrow's points are in its part's frame,
+    which moves the arrow but keeps its length. Rotate arrows are sized by
+    their radius, so they are left alone.
+    """
+    fname = project.path.name
+    head = arrow_head_length({m: boxes.get(m) for m in project.assembly.models}, arrow_scale)
+    for i, step in enumerate(project.steps):
+        for j, arrow in enumerate(step.arrows):
+            length = math.dist(arrow.from_, arrow.to)
+            if arrow.kind == "straight" and length < head:
+                shown, needed = _apart(length, head)
+                project.warnings.append(
+                    f"{fname}: [[step]] #{i + 1} ({step.id}): [[step.arrow]] #{j + 1} is shorter than "
+                    f"its head ({shown} mm < {needed} mm) and will not be drawn")
+
+
 # ── Theme ────────────────────────────────────────────────────────────
 
 # Built-in default palette. A theme TOML overrides only the tokens it names;

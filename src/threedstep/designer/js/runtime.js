@@ -210,11 +210,12 @@ export async function version() {
 
 /**
  * Check a project TOML against the loaded models' trees ({file name: tree},
- * the shape glb.tree() gives). No model bytes cross the bridge.
+ * the shape glb.tree() gives) and bounding boxes ({file name: {min, max}},
+ * which size the arrows). No model bytes cross the bridge.
  * Resolves to {errors, warnings}.
  */
-export async function validate(projectToml, trees) {
-  return JSON.parse(await call("validate", projectToml, JSON.stringify(trees)));
+export async function validate(projectToml, trees, boxes = {}) {
+  return JSON.parse(await call("validate", projectToml, JSON.stringify(trees), JSON.stringify(boxes)));
 }
 
 /**

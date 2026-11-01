@@ -14,7 +14,7 @@ from pathlib import Path, PurePosixPath
 
 import threedstep
 import threedstep.config as _config
-from threedstep.config import check_ids, load_project, load_theme, tomllib
+from threedstep.config import check_arrows, check_ids, load_project, load_theme, tomllib
 from threedstep.renderer import build_page
 
 _PKG = Path(_config.__file__).resolve().parent
@@ -251,12 +251,25 @@ def _theme_dir_warnings(name: str, theme_dir: str) -> list[str]:
             f"{name}.toml in '{theme_dir}' if there is one."]
 
 
-def validate(project_toml: str, model_trees_json: str) -> str:
+def _arrow_scale(project) -> float:
+    """The theme's arrow_scale, the theme found as the 3dstep command finds
+    it; the default when it cannot be (_theme_problems says why)."""
+    a = project.assembly
+    try:
+        return load_theme(a.theme, PROJECT_PATH, a.theme_dir).behavior.arrow_scale
+    except (OSError, ValueError):
+        return 1.0
+
+
+def validate(project_toml: str, model_trees_json: str, model_boxes_json: str = "") -> str:
     """Check a project against the models the designer has loaded.
 
     ``model_trees_json`` maps each model file name to its nodes, nested as
     ``threedstep.glb.tree`` returns them (``[{"id", "label", "children",
-    "has_mesh"}]``) or as a flat list of ids. No model bytes cross the bridge.
+    "has_mesh"}]``) or as a flat list of ids. ``model_boxes_json`` maps each
+    to its bounding box (``{"min", "max"}`` as ``threedstep.glb.bbox`` gives
+    it, or null), which sizes the arrows; the arrows are checked only when
+    every model has one. No model bytes cross the bridge.
     Returns ``{"errors": [...], "warnings": [...]}``, one line per problem.
     """
     _write_project(project_toml)
@@ -273,6 +286,9 @@ def validate(project_toml: str, model_trees_json: str) -> str:
             check_ids(project, trees)
         except ValueError as e:
             errors.extend(str(e).splitlines())
+    boxes = json.loads(model_boxes_json or "{}")
+    if not missing and all(m in boxes for m in project.assembly.models):
+        check_arrows(project, boxes, _arrow_scale(project))
     theme_errors, theme_warnings = _theme_problems(project)
     return json.dumps({
         "errors": errors + theme_errors,

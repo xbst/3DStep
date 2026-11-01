@@ -14,7 +14,7 @@ import {
   downloadFile, esc, formatBytes, formatCount, maybeShowAboutOnFirstVisit, openAbout, openGenerate, openImport, openModal,
 } from "./dialogs.js";
 import { readGlb } from "./import/glb-reader.js";
-import { treeOf } from "./import/model.js";
+import { bboxOf, treeOf } from "./import/model.js";
 import { slugify } from "./import/ids.js";
 
 const state = new ProjectState();
@@ -658,10 +658,13 @@ function scheduleValidation(editorPanel) {
       renderStatus();
       return;
     }
-    const trees = {};
-    for (const model of state.loadedModels()) trees[model.name] = treeOf(model);
+    const trees = {}, boxes = {};
+    for (const model of state.loadedModels()) {
+      trees[model.name] = treeOf(model);
+      boxes[model.name] = bboxOf(model);
+    }
     try {
-      problems = await runtime.validate(editorPanel.getValue(), trees);
+      problems = await runtime.validate(editorPanel.getValue(), trees, boxes);
     } catch (e) {
       problems = { errors: [e.message || String(e)], warnings: [] };
     }
