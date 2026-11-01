@@ -755,6 +755,7 @@
   ].join("\n");
 
   function edgeKernel(width) {
+    if (!(width > 0)) return [];
     var w = clamp(Math.round(width), 1, 6);
     var lo = 0 - Math.floor((w - 1) / 2), hi = Math.ceil((w - 1) / 2);
     var out = [];
