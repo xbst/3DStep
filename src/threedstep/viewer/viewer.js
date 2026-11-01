@@ -1448,9 +1448,14 @@
           // in most themes (white on white): halfway to the edge color, it
           // shows as a translucent silhouette.
           if (part.cls === "ghost") fill.lerp(cssColor(tokens.partEdge), 0.5);
+          // Translucent parts skip the edge pass, so the editor's selection
+          // cue is an accent tint here (and a less faint ghost), as the
+          // shaded style tints a selected part.
+          if (part.selected) fill.lerp(cssColor(tokens.accent), 0.6);
+          var ghostOpacity = part.selected ? Math.max(tokens.ghostOpacity, 0.5) : tokens.ghostOpacity;
           if (!part.fadeMat) part.fadeMat = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false });
           part.fadeMat.color.copy(fill);
-          part.fadeMat.opacity = part.alpha * (part.cls === "ghost" ? tokens.ghostOpacity : 1);
+          part.fadeMat.opacity = part.alpha * (part.cls === "ghost" ? ghostOpacity : 1);
           part.fadeMat.side = part.doubleSided ? THREE.DoubleSide : THREE.FrontSide;
           part.fadeMat.needsUpdate = true;
           part.meshes.forEach(function (m) { m.material = part.fadeMat; });
