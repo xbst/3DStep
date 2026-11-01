@@ -556,21 +556,24 @@ class _Nodes:
             for node in trees.get(model, []):
                 self._add(node, model)
 
-    def _add(self, node: object, model: str) -> None:
-        # A flat list of ids carries no hierarchy, so each id counts as a part.
-        if isinstance(node, str):
-            nid, kids, mesh = node, [], True
-        else:
-            nid = str(node.get("id", ""))
-            kids = list(node.get("children") or [])
-            mesh = bool(node.get("has_mesh", not kids))
-        self.owners.setdefault(nid, []).append(model)
-        if nid not in self.has_mesh:                # a duplicate is reported; the first wins
-            self.order.append(nid)
-            self.has_mesh[nid] = mesh
-            self.children[nid] = [k if isinstance(k, str) else str(k.get("id", "")) for k in kids]
-        for k in kids:
-            self._add(k, model)
+    def _add(self, root: object, model: str) -> None:
+        # Depth first with an explicit stack, so no hierarchy is too deep.
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            # A flat list of ids carries no hierarchy, so each id counts as a part.
+            if isinstance(node, str):
+                nid, kids, mesh = node, [], True
+            else:
+                nid = str(node.get("id", ""))
+                kids = list(node.get("children") or [])
+                mesh = bool(node.get("has_mesh", not kids))
+            self.owners.setdefault(nid, []).append(model)
+            if nid not in self.has_mesh:            # a duplicate is reported; the first wins
+                self.order.append(nid)
+                self.has_mesh[nid] = mesh
+                self.children[nid] = [k if isinstance(k, str) else str(k.get("id", "")) for k in kids]
+            stack.extend(reversed(kids))
 
     def parts_under(self, nid: str) -> list[str]:
         """The parts (nodes with a mesh) a reference means: the node itself, or

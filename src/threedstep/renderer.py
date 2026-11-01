@@ -462,7 +462,12 @@ class Page:
 
 
 def _count_parts(nodes: list[dict]) -> int:
-    return sum(int(n["has_mesh"]) + _count_parts(n["children"]) for n in nodes)
+    count, stack = 0, list(nodes)
+    while stack:                    # a stack, not recursion: any depth counts
+        node = stack.pop()
+        count += int(node["has_mesh"])
+        stack.extend(node["children"])
+    return count
 
 
 def build_page(path: Path, *, theme_name: str = "") -> Page:

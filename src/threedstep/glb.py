@@ -129,13 +129,40 @@ def _index(value: object, size: int, what: str) -> int:
     return value
 
 
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _is_number(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:                       # an integer past the float range
+        return False
+
+
+def _numbers(value: object, length: int | None = None) -> bool:
+    """Whether ``value`` is a list of finite numbers (of ``length`` of them)."""
+    return isinstance(value, list) and (length is None or len(value) == length) \
+        and all(_is_number(v) for v in value)
+
+
+# A node's transform keys and the count of numbers each holds.
+_TRANSFORMS = {"translation": 3, "rotation": 4, "scale": 3, "matrix": 16}
+
+
 def _check_structure(doc: GlbDoc) -> None:
-    """Raise ValueError for references a loader would trip over."""
+    """Raise ValueError for references a loader would trip over, and for values
+    of the wrong type, so the readers below never meet one."""
     asset = doc.json.get("asset")
     if not isinstance(asset, dict) or not str(asset.get("version", "")).startswith("2."):
         raise ValueError("the GLB's asset.version is not 2.0")
     nodes, meshes = _list(doc, "nodes"), _list(doc, "meshes")
     accessors, views, buffers = _list(doc, "accessors"), _list(doc, "bufferViews"), _list(doc, "buffers")
+    for key in ("extensionsRequired", "extensionsUsed"):
+        if not all(isinstance(ext, str) for ext in _list(doc, key)):
+            raise ValueError(f"the GLB's '{key}' is not a list of names")
 
     buffer_sizes = []
     for i, buf in enumerate(buffers):
@@ -157,13 +184,20 @@ def _check_structure(doc: GlbDoc) -> None:
         if not isinstance(start, int) or not isinstance(size, int) or start < 0 or size < 1 \
                 or start + size > buffer_sizes[b]:
             raise ValueError(f"bufferView {i} runs past the end of buffer {b}")
+        stride = view.get("byteStride")
+        if stride is not None and (not _is_int(stride) or stride < 0):
+            raise ValueError(f"bufferView {i} has a byteStride that is not a byte count")
 
     for i, acc in enumerate(accessors):
         if not isinstance(acc, dict):
             raise ValueError(f"accessor {i} is not an object")
-        component = acc.get("componentType")
-        if component not in _COMPONENTS or acc.get("type") not in _TYPE_SIZES:
+        component, kind = acc.get("componentType"), acc.get("type")
+        if not _is_int(component) or component not in _COMPONENTS \
+                or not isinstance(kind, str) or kind not in _TYPE_SIZES:
             raise ValueError(f"accessor {i} has an unknown componentType or type")
+        for key in ("min", "max"):
+            if key in acc and not _numbers(acc[key]):
+                raise ValueError(f"accessor {i} has a {key} that is not a list of numbers")
         count = acc.get("count")
         if isinstance(count, bool) or not isinstance(count, int) or count < 1:
             raise ValueError(f"accessor {i} has no valid count")
@@ -193,6 +227,9 @@ def _check_structure(doc: GlbDoc) -> None:
     for i, node in enumerate(nodes):
         if not isinstance(node, dict):
             raise ValueError(f"node {i} is not an object")
+        for key, length in _TRANSFORMS.items():
+            if key in node and not _numbers(node[key], length):
+                raise ValueError(f"node {i} has a {key} that is not a list of {length} numbers")
         if "mesh" in node:
             _index(node["mesh"], len(meshes), f"node {i} names mesh")
         children = node.get("children", [])
@@ -249,19 +286,23 @@ def tree(doc: GlbDoc) -> list[dict]:
     "has_mesh"}`` per node, roots in scene order. ``label`` is the CAD name the
     importer read (``extras.label``), else the id."""
     nodes = doc.json.get("nodes", [])
-
-    def build(i: int) -> dict:
+    out: list[dict] = []
+    # An explicit stack, not recursion, so no hierarchy is too deep to read.
+    stack = [(r, out) for r in reversed(_roots(doc))]
+    while stack:
+        i, siblings = stack.pop()
         node = nodes[i]
         extras = node.get("extras") if isinstance(node.get("extras"), dict) else {}
         label = extras.get("label")
-        return {
+        entry = {
             "id": _name(node),
             "label": label if isinstance(label, str) and label else _name(node),
-            "children": [build(c) for c in node.get("children", [])],
+            "children": [],
             "has_mesh": "mesh" in node,
         }
-
-    return [build(r) for r in _roots(doc)]
+        siblings.append(entry)
+        stack.extend((c, entry["children"]) for c in reversed(node.get("children", [])))
+    return out
 
 
 def triangle_count(doc: GlbDoc) -> int:
