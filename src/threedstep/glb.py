@@ -521,18 +521,26 @@ def slugify(label: object) -> str:
     return re.sub(r"[^a-z0-9]+", "_", text).strip("_") or "part"
 
 
-def assign_ids(labels) -> list[str]:
+def assign_ids(labels, *, prefix: str = "") -> list[str]:
     """Unique ids for labels in document order.
 
     The first label with a given slug keeps it; later ones get ``slug_N`` with
     the smallest ``N >= 2`` not already taken, whether by a suffixed id or by
     another label's bare slug (``m3x12``, ``m3x12_2``, ``m3x12_3``).
+
+    A ``prefix`` goes in front of every slug first (``tq2_pi4_bolt``): the ids
+    the designer gives a model when another model of its project already uses
+    some of its ids (``prefixIds`` in ``designer/js/import/ids.js``). It must be
+    the start of a valid id; ValueError otherwise.
     """
+    if prefix and not _ID_RE.fullmatch(prefix):
+        raise ValueError(f"the id prefix {prefix!r} would make invalid ids: it must start with a letter, "
+                         "a digit or _ and hold only letters, digits, _, . and -")
     taken: set[str] = set()
     next_suffix: dict[str, int] = {}
     ids: list[str] = []
     for label in labels:
-        slug = candidate = slugify(label)
+        slug = candidate = prefix + slugify(label)
         if candidate in taken:
             # Every suffix below next_suffix[slug] is taken already, so the
             # search can resume there instead of at 2.

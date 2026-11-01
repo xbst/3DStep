@@ -460,7 +460,8 @@ def _merge_primitives(prims: list[_Prim]) -> list[_Prim]:
     return out
 
 
-def _build(result: dict, *, name: str, merge_bodies, min_size: float) -> tuple[glb.Model, dict]:
+def _build(result: dict, *, name: str, merge_bodies, min_size: float,
+           id_prefix: str = "") -> tuple[glb.Model, dict]:
     merges = merge_bodies if callable(merge_bodies) else (lambda info: merge_bodies is not False)
     min_size = min_size if min_size and min_size > 0 else 0.0
     meshes = result.get("meshes") or []
@@ -519,7 +520,7 @@ def _build(result: dict, *, name: str, merge_bodies, min_size: float) -> tuple[g
 
     # Ids from every label before any body is dropped, so a part keeps its id
     # whatever the quality and the size filter.
-    ids = glb.assign_ids([e["label"] for e in entries])
+    ids = glb.assign_ids([e["label"] for e in entries], prefix=id_prefix)
 
     bodies = empty = dropped = 0
     prims: list[list[_Prim] | None] = []
@@ -568,7 +569,8 @@ def _build(result: dict, *, name: str, merge_bodies, min_size: float) -> tuple[g
     return model, counts
 
 
-def build_model(result: dict, *, name: str = "model.glb", merge_bodies=True, min_size: float = 0.0) -> glb.Model:
+def build_model(result: dict, *, name: str = "model.glb", merge_bodies=True, min_size: float = 0.0,
+                id_prefix: str = "") -> glb.Model:
     """A :func:`read_step` result as a model, by the designer's tree mapping
     (SPEC 13.2). For each node under the unnamed root, in document order:
 
@@ -586,22 +588,26 @@ def build_model(result: dict, *, name: str = "model.glb", merge_bodies=True, min
     ``min_size`` mm are dropped, then parts without bodies, then groups
     without parts. Bodies of one color within a part are one primitive.
     ``merge_bodies`` is True, False, or a function given ``{"label", "src",
-    "bodies", "names"}`` for each node with several bodies.
+    "bodies", "names"}`` for each node with several bodies. An ``id_prefix``
+    goes in front of every id (:func:`glb.assign_ids`), as the designer puts
+    one on a model whose ids another model of its project already uses.
     """
-    return _build(result, name=name, merge_bodies=merge_bodies, min_size=min_size)[0]
+    return _build(result, name=name, merge_bodies=merge_bodies, min_size=min_size, id_prefix=id_prefix)[0]
 
 
 def convert_step(path: str | Path, *, linear_deflection: float = 0.001, angular_deflection: float = 0.5,
                  linear_deflection_type: str = "bounding_box_ratio", min_size: float = 0.0,
-                 merge_bodies=True, name: str = "") -> glb.Model:
+                 merge_bodies=True, name: str = "", id_prefix: str = "") -> glb.Model:
     """A STEP file as a model, as the designer imports it: :func:`read_step`
     then :func:`build_model`. Raises ValueError for a file that cannot be
-    read or leaves nothing to show."""
+    read or leaves nothing to show, or for an ``id_prefix`` that would make
+    invalid ids (checked before the file is read)."""
     path = Path(path)
+    glb.assign_ids([], prefix=id_prefix)   # refuses a bad prefix now, not after the slow read
     result = read_step(path, linear_deflection=linear_deflection, angular_deflection=angular_deflection,
                        linear_deflection_type=linear_deflection_type)
     model, counts = _build(result, name=name or glb_name_for(path), merge_bodies=merge_bodies,
-                           min_size=min_size)
+                           min_size=min_size, id_prefix=id_prefix)
     if not model.nodes:
         if counts["bodies"] > counts["empty_bodies"]:
             raise ValueError(f"{path.name} has no bodies of {min_size:g} mm or larger; lower the size filter")

@@ -20,11 +20,24 @@ export function slugify(label) {
 // keeps it; later ones get slug_N with the smallest N >= 2 not already taken,
 // whether by a suffixed id or by another label's bare slug (m3x12, m3x12_2).
 export function assignIds(labels) {
-  const taken = new Set();
+  return uniqueIds(labels.map(slugify));
+}
+
+// A model's ids with a prefix in front (tq2_pi4_bolt), each made unique the
+// same way against the ids in `taken` (other models') and the ones before
+// it: what a model gets when it joins a project whose models already use some
+// of its ids. On ids from assignIds, with nothing in `taken` that starts with
+// the prefix, this is what glb.assign_ids(labels, prefix=...) gives, so
+// `3dstep model.step --id-prefix` writes the same ids.
+export function prefixIds(ids, prefix, taken = []) {
+  return uniqueIds(ids.map(id => `${prefix}${id}`), taken);
+}
+
+function uniqueIds(slugs, already = []) {
+  const taken = new Set(already);
   const nextSuffix = new Map();
   const ids = [];
-  for (const label of labels) {
-    const slug = slugify(label);
+  for (const slug of slugs) {
     let candidate = slug;
     if (taken.has(candidate)) {
       // Every suffix below nextSuffix[slug] is taken already, so the search

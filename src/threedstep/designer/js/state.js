@@ -22,7 +22,7 @@ import {
 } from "./project-model.js";
 import { isValidId } from "./import/ids.js";
 import {
-  DEFAULT_RUNTIME_BYTES, bboxOf, deleteNodes, deletedIds, estimateGlbSize, glbNameFor, mergeGroup as mergeModelGroup,
+  DEFAULT_RUNTIME_BYTES, bboxOf, deleteNodes, deletedIds, estimateGlbSize, glbNameFor, joinIds, mergeGroup as mergeModelGroup,
   nodeIndex, triangleCount,
 } from "./import/model.js";
 import { writeGlb } from "./import/glb-writer.js";
@@ -802,13 +802,17 @@ export class ProjectState {
 
   // A newly imported model (or an opened GLB, with its bytes): added to the
   // project under a file name no other model has. The first model names an
-  // untitled project and gets it a first step.
+  // untitled project and gets it a first step. A model whose ids the loaded
+  // models already use gets its prefix on every id (joinIds, which the import
+  // dialogs show first), and its old bytes no longer describe it.
   addModel(model, { bytes = null, title = "", up = "", origin = "import" } = {}) {
     if (!this._prepareMutation(origin)) return null;
     const next = this.project.clone();
     const taken = [...next.assembly.models, ...this.models.keys()];
     const name = taken.includes(model.name) ? glbNameFor(model.name, taken) : model.name;
-    const named = name === model.name ? model : { ...model, name };
+    const joined = joinIds(name === model.name ? model : { ...model, name }, this.registry.model);
+    const named = joined.model;
+    if (joined.prefix) bytes = null;
     const first = !this.loadedModels().length;
     next.assembly.models.push(name);
     if (title && next.assembly.title === new Project().assembly.title && first) next.assembly.title = title;

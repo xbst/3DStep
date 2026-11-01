@@ -16,7 +16,7 @@
 // new one. Typed arrays are shared between the old and the new model, so
 // treat them as read-only.
 
-import { isValidId, slugify } from "./ids.js";
+import { isValidId, prefixIds, slugify } from "./ids.js";
 
 export const VERSION = "0.1.0";
 export const GENERATOR = `designer ${VERSION}`;
@@ -40,6 +40,26 @@ export function glbNameFor(fileName, taken = []) {
   let name = `${stem}.glb`;
   for (let n = 2; used.has(name); n++) name = `${stem}_${n}.glb`;
   return name;
+}
+
+// The prefix a model's ids get when they clash with another model's: its GLB
+// file's stem by glbNameFor's rule, then "_" (tq2_pi4.glb: tq2_pi4_).
+export function idPrefixFor(name) {
+  const base = String(name || "").replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "");
+  return `${base ? slugify(base) : "model"}_`;
+}
+
+// How a model joins a project (SPEC 7): when the project's models already use
+// any of its ids (inUse: id -> the file name of the model using it), every id
+// gets the model's prefix, made unique against the ids in use, so the parts of
+// both stay apart; else it keeps its ids. All of a model's ids or none.
+// Returns { model, prefix ("" when nothing is shared), shared: [{ id, model }] }.
+export function joinIds(model, inUse) {
+  const shared = model.nodes.filter(n => inUse.has(n.id)).map(n => ({ id: n.id, model: inUse.get(n.id) }));
+  if (!shared.length) return { model, prefix: "", shared };
+  const prefix = idPrefixFor(model.name);
+  const ids = prefixIds(model.nodes.map(n => n.id), prefix, inUse.keys());
+  return { model: { ...model, nodes: model.nodes.map((n, i) => ({ ...n, id: ids[i] })) }, prefix, shared };
 }
 
 // ── Meshes and primitives ──────────────────────────────────────────────

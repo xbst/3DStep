@@ -137,6 +137,7 @@ def _convert(args: argparse.Namespace) -> None:
             step_path, out_path,
             min_size=args.min_size or 0.0,
             merge_bodies=args.merge_bodies is not False,
+            id_prefix=args.id_prefix or "",
             **stepconv.tessellation(args.quality, args.deflection, args.angle),
         )
     except MemoryError:
@@ -232,6 +233,14 @@ def _build_parser() -> argparse.ArgumentParser:
              "default), or one part per body.",
     )
     parser.add_argument(
+        "--id-prefix",
+        default=None,
+        metavar="PREFIX",
+        help="Convert only: put PREFIX in front of every id (tq2_pi4_bolt), as "
+             "the designer does when another model of the project already uses "
+             "some of the model's ids.",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"3dstep {__version__}",
@@ -251,6 +260,7 @@ def _given(args: argparse.Namespace, names: tuple[str, ...]) -> list[str]:
         "--min-size": args.min_size is not None,
         "--merge-bodies": args.merge_bodies is True,
         "--no-merge-bodies": args.merge_bodies is False,
+        "--id-prefix": args.id_prefix is not None,
     }
     return [name for name in names if flags[name]]
 
@@ -262,7 +272,7 @@ def _verb(flags: list[str], one: str, many: str) -> str:
 _DESIGNER_FLAGS = ("--port", "--no-browser")
 _RENDER_FLAGS = ("--theme",)
 _CONVERT_FLAGS = ("--quality", "--deflection", "--angle", "--min-size", "--merge-bodies",
-                  "--no-merge-bodies")
+                  "--no-merge-bodies", "--id-prefix")
 
 
 def _check_convert_values(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -274,6 +284,10 @@ def _check_convert_values(parser: argparse.ArgumentParser, args: argparse.Namesp
         parser.error(f"--angle must be between 0 and 180 degrees, got {args.angle:g}")
     if args.min_size is not None and not (math.isfinite(args.min_size) and args.min_size >= 0):
         parser.error(f"--min-size must be zero or a positive number of millimeters, got {args.min_size:g}")
+    from .glb import _ID_RE
+    if args.id_prefix and not _ID_RE.fullmatch(args.id_prefix):
+        parser.error("--id-prefix must start with a letter, a digit or _ and hold only letters, digits, "
+                     f"_, . and -, so the ids stay valid: got {args.id_prefix!r}")
 
 
 def main(argv: list[str] | None = None) -> None:
