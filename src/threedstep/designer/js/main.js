@@ -221,12 +221,54 @@ function pickModelFor(name) {
 async function attachGlb(file, name) {
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
+    noteSpelling(name, file.name);
     state.attachModel(name, readGlb(bytes, { name, units: "mm", up: "z", targetUp: state.project.assembly.up }), bytes);
     return true;
   } catch (e) {
     showBanner("open-error", `${esc(file.name)} could not be read: ${esc(e.message || e)}`, { warn: true });
     return false;
   }
+}
+
+// GLB files paired with the project's names for them ({name: file}): the same
+// file name first, then the same name in another case, which the 3dstep
+// command finds on Windows and macOS (their file systems ignore case). The
+// project keeps its spelling; a file pairs with one name at most.
+function matchModelFiles(names, files) {
+  const base = (name) => name.split("/").pop();
+  const left = files.slice();
+  const pairs = new Map();
+  for (const fold of [(s) => s, (s) => s.toLowerCase()]) {
+    for (const name of names) {
+      if (pairs.has(name)) continue;
+      const i = left.findIndex((f) => fold(f.name) === fold(base(name)));
+      if (i >= 0) pairs.set(name, left.splice(i, 1)[0]);
+    }
+  }
+  return pairs;
+}
+
+// Files opened under another name than the project gives them: a model
+// matched in another case, or a file picked for a name. The status bar says
+// so, since the 3dstep command looks for the project's spelling.
+let spellings = new Map();   // the name in the project -> the opened file's name
+function noteSpelling(name, fileName) {
+  if (name.split("/").pop() !== fileName) spellings.set(name, fileName);
+  else spellings.delete(name);
+}
+
+function spellingNote() {
+  const renamed = [...spellings].filter(([name]) => state.models.has(name));
+  if (!renamed.length) return "";
+  const lines = renamed.map(([name, fileName]) => {
+    const want = name.split("/").pop();
+    return want.toLowerCase() === fileName.toLowerCase()
+      ? `${fileName} is ${want} in the project. The 3dstep command finds it under that name on Windows and macOS, whose file systems ignore case, but not on Linux: rename the file to match.`
+      : `${fileName} is ${want} in the project: rename the file to match, for the 3dstep command to find it.`;
+  });
+  const [name, fileName] = renamed[0];
+  const more = renamed.length > 1 ? ` (and ${renamed.length - 1} more)` : "";
+  return `<span class="status-note" title="${esc(lines.join("\n"))}">${esc(fileName)} opened as ${esc(name.split("/").pop())}${more}</span>`;
 }
 
 // ── Saving and unsaved work ─────────────────────────────────────────
@@ -367,20 +409,17 @@ async function importFiles(files, editorPanel, showTab) {
   }
 }
 
-// A project TOML with its GLB files (matched by file name); GLB files alone
-// fill in models the project names but has not loaded.
+// A project TOML with its GLB files (matched by file name, in any case); GLB
+// files alone fill in models the project names but has not loaded.
 async function openFiles(files, editorPanel, showTab) {
   const list = [...files];
   const toml = list.find((f) => /\.toml$/i.test(f.name));
   const glbs = list.filter((f) => /\.glb$/i.test(f.name));
   if (!toml) {
-    const missing = state.missingModels();
-    const rest = [];
-    for (const file of glbs) {
-      const name = missing.find((m) => m.split("/").pop() === file.name);
-      if (name) await attachGlb(file, name);
-      else rest.push(file);
-    }
+    const pairs = matchModelFiles(state.missingModels(), glbs);
+    for (const [name, file] of pairs) await attachGlb(file, name);
+    const attached = new Set(pairs.values());
+    const rest = glbs.filter((f) => !attached.has(f));
     if (rest.length) await importFiles(rest, editorPanel, showTab);
     return;
   }
@@ -401,18 +440,22 @@ async function openFiles(files, editorPanel, showTab) {
   const models = new Map();
   const bytesMap = new Map();
   const problems = [];
-  for (const name of parsed.project.assembly.models) {
-    const file = glbs.find((f) => f.name === name.split("/").pop());
-    if (!file) continue;
+  const before = spellings;
+  spellings = new Map();
+  for (const [name, file] of matchModelFiles(parsed.project.assembly.models, glbs)) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       models.set(name, readGlb(bytes, { name, units: "mm", up: "z", targetUp: parsed.project.assembly.up }));
       bytesMap.set(name, bytes);
+      noteSpelling(name, file.name);
     } catch (e) {
       problems.push(`${file.name}: ${e.message || e}`);
     }
   }
-  if (!state.loadProject(parsed.project, { models, bytes: bytesMap, origin: "open", sourceText: text, fileName: toml.name.replace(/\.toml$/i, "") })) return;
+  if (!state.loadProject(parsed.project, { models, bytes: bytesMap, origin: "open", sourceText: text, fileName: toml.name.replace(/\.toml$/i, "") })) {
+    spellings = before;
+    return;
+  }
   hideBanner("open-error");
   hideBanner("save");
   if (problems.length) showBanner("open-error", esc(problems.join(" ")), { warn: true });
@@ -511,6 +554,8 @@ function renderStatus() {
   if (sel.parts.length) bits.push(`<span>${sel.parts.length} selected</span>`);
   else if (sel.arrow >= 0) bits.push(`<span>Arrow ${sel.arrow + 1} selected</span>`);
   else if (sel.label >= 0) bits.push(`<span>Label ${sel.label + 1} selected</span>`);
+  const note = spellingNote();
+  if (note) bits.push(note);
   bits.push('<span class="status-spacer"></span>');
   if (st.loadedModels().length) {
     bits.push(`<span>${formatCount(st.triangles())} triangles</span>`);

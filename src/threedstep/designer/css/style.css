@@ -335,6 +335,7 @@ html, body {
 .statusbar button:hover { border-color: var(--border-focus); color: var(--text); }
 .statusbar .status-warn { color: var(--warn); }
 .statusbar .status-error { color: var(--danger); }
+.statusbar .status-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; cursor: help; }
 
 /* ── Shared controls ─────────────────────────────────────────────── */
 
