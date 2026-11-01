@@ -445,7 +445,21 @@ function setupFileIO(editorPanel, viewport, showTab) {
     depth = 0;
     vp.classList.remove("dragover");
     const files = [...e.dataTransfer.files];
-    if (files.some((f) => /\.toml$/i.test(f.name))) await openFiles(files, editorPanel, showTab);
+    const toml = files.find((f) => /\.toml$/i.test(f.name));
+    // Name what the chosen path leaves out, so a drop never does nothing silently.
+    const skipped = toml
+      ? files.filter((f) => f !== toml && !/\.glb$/i.test(f.name))
+      : files.filter((f) => !/\.(step|stp|glb|gltf)$/i.test(f.name));
+    if (skipped.length) {
+      showBanner("drop",
+        `Skipped ${skipped.map((f) => `<code>${esc(f.name)}</code>`).join(", ")}: ` +
+        (toml ? `a drop with a project .toml opens <code>${esc(toml.name)}</code> and its .glb files only; drop .step, .stp, .glb or .gltf files on their own to import them.`
+          : "drop .step, .stp, .glb or .gltf files to import models, or a project .toml with its .glb files."),
+        { warn: true });
+    } else {
+      hideBanner("drop");
+    }
+    if (toml) await openFiles(files, editorPanel, showTab);
     else if (files.every((f) => /\.glb$/i.test(f.name)) && state.missingModels().length) await openFiles(files, editorPanel, showTab);
     else await importFiles(files.filter((f) => /\.(step|stp|glb|gltf)$/i.test(f.name)), editorPanel, showTab);
   });
