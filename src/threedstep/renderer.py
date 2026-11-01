@@ -64,6 +64,7 @@ def build_scene(project: Project) -> dict:
         "style": a.style,
         "up": a.up,
         "start": a.start,
+        "arrow_scale": a.arrow_scale,
         "camera": _camera(project.camera),
         "models": [{"name": name} for name in a.models],
         # Only the parts a [[part]] table describes. An empty name or color

@@ -5,6 +5,9 @@
 
 import { esc } from "./dialogs.js";
 
+// The arrow scale as the field shows it: a plain number, four decimals at most.
+const fmtScale = (v) => (Number.isFinite(v) ? String(Number(v.toFixed(4))) : "1");
+
 export class StepsPanel {
   constructor(container, state, viewport) {
     this.container = container;
@@ -30,6 +33,7 @@ export class StepsPanel {
               <option value="visible">Every part visible</option><option value="hidden">Every part hidden</option></select></div>
             <div class="insp-row"><label for="asm-up">Up axis</label><select id="asm-up" class="field-select">
               <option value="z">Z (most CAD tools)</option><option value="y">Y (Fusion, glTF)</option></select></div>
+            <div class="insp-row"><label for="asm-arrow-scale">Arrow size</label><input id="asm-arrow-scale" class="field-input" type="number" step="0.1" min="0.1" title="Multiplies the size of every arrow: arrows are sized from the box around every model, so lower this when a big part makes them too large for the parts the steps are about (0.5 halves them); the theme's arrow_scale multiplies it too"></div>
             <div class="insp-row"><span class="insp-label">Home view</span><span class="insp-value insp-buttons">
               <span class="insp-note" id="asm-home-state"></span>
               <button class="small-btn" id="asm-home-use" title="The current view becomes the page's home view ([camera]); step 1 starts there">Use view</button>
@@ -71,6 +75,11 @@ export class StepsPanel {
     $("#asm-desc").addEventListener("change", (e) => { if (!st.setAssembly({ description: e.target.value.trim() })) this.render(); });
     $("#asm-start").addEventListener("change", (e) => { if (!st.setAssembly({ start: e.target.value })) this.render(); });
     $("#asm-up").addEventListener("change", (e) => { if (!st.setAssembly({ up: e.target.value })) this.render(); });
+    $("#asm-arrow-scale").addEventListener("change", (e) => {
+      const v = Number(e.target.value);
+      if (!(v > 0) || !Number.isFinite(v)) { e.target.value = fmtScale(st.project.assembly.arrow_scale); return; }
+      if (!st.setAssembly({ arrow_scale: v })) this.render();
+    });
     $("#asm-home-use").addEventListener("click", () => this.viewport.useViewAsHome());
     $("#asm-home-clear").addEventListener("click", () => st.setCamera(null));
     $("#step-add").addEventListener("click", () => {
@@ -105,6 +114,7 @@ export class StepsPanel {
     setValue($("#asm-desc"), p.assembly.description.replace(/\n$/, ""));
     setValue($("#asm-start"), p.assembly.start);
     setValue($("#asm-up"), p.assembly.up);
+    setValue($("#asm-arrow-scale"), fmtScale(p.assembly.arrow_scale));
     $("#asm-home-state").textContent = p.camera ? "captured" : "fits the model";
     $("#asm-home-clear").disabled = !p.camera;
     $("#asm-home-use").disabled = !st.loadedModels().length;

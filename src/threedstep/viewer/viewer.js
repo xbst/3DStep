@@ -508,8 +508,13 @@
   }
 
   // ── Arrow math (SPEC 9.7) ──────────────────────────────────────────
-  function arrowSizes(sceneDiameter, arrowScale) {
-    var s = num(arrowScale, 1);
+  // Sized from the diameter of the box around every model, then multiplied by
+  // the theme's [behavior] arrow_scale and the project's [assembly]
+  // arrow_scale (the project's lever when a big context part would make the
+  // arrows of a small subject huge). config.arrow_head_length is the same rule.
+  function arrowSizes(sceneDiameter, arrowScale, projectScale) {
+    var p = num(projectScale, 1);
+    var s = num(arrowScale, 1) * (p > 0 ? p : 1);
     return {
       shaftRadius: clamp(sceneDiameter * 0.006, 0.5, 6) * s,
       headLength: clamp(sceneDiameter * 0.03, 2, 20) * s,
@@ -2080,7 +2085,7 @@
         unitCone = new THREE.ConeGeometry(1, 1, 18, 1, false);
       }
     }
-    function sizes() { return arrowSizes(modelRadius * 2, behavior.arrowScale); }
+    function sizes() { return arrowSizes(modelRadius * 2, behavior.arrowScale, scene.arrow_scale); }
     // `selected` (editor): the arrow is the designer's selection, drawn with
     // the accent edge class (line art) or in the accent color (shaded).
     function arrowMaterial(color, selected) {
@@ -3004,7 +3009,8 @@
         setFullscreenClass: setFullscreenClass, tokens: function () { return tokens; }, parts: function () { return parts; },
         scene3: function () { return scene3; }, resolveCamera: resolveCamera, isVisible: function () { return visible; },
         controls: function () { return controls; }, behavior: behavior,
-        camera: function () { return camera; }, arrows: function () { return arrows; }, fitInsets: fitInsets
+        camera: function () { return camera; }, arrows: function () { return arrows; }, fitInsets: fitInsets,
+        arrowSizes: sizes
       }
     });
 
