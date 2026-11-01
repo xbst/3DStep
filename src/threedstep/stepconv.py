@@ -611,8 +611,18 @@ def convert_step(path: str | Path, *, linear_deflection: float = 0.001, angular_
 
 def write(path_in: str | Path, path_out: str | Path, **options) -> ConvertResult:
     """Convert ``path_in`` (STEP) to ``path_out`` (GLB) with :func:`convert_step`'s
-    keyword options. OSError for a file that cannot be read or written."""
+    keyword options. OSError for a file that cannot be read or written;
+    ValueError when ``path_out`` names the STEP file itself, which the write
+    would otherwise destroy."""
     path_out = Path(path_out)
+    try:
+        # samefile, not a path comparison: it also catches a case variant, a
+        # short name or a link on Windows.
+        same = os.path.samefile(path_in, path_out)
+    except OSError:
+        same = False
+    if same:
+        raise ValueError(f"the output would overwrite the STEP file: {path_in}")
     model = convert_step(path_in, name=path_out.name, **options)
     data = glb.write_glb(model, generator=GENERATOR)
     try:
