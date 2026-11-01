@@ -56,6 +56,8 @@ export class Viewport {
     this._themeTokens = null;
     this._behavior = {};
     this._hadModels = false;
+    this._modelNames = [];
+    this._reframe = null;
     this._camSig = "";
     this._loading = 0;
     // Set by the annotation tools, which implement pickPoint() for the
@@ -200,6 +202,8 @@ export class Viewport {
     }
     const models = this._modelBytes();
     this._hadModels = Object.keys(models).length > 0;
+    this._modelNames = Object.keys(models);
+    this._reframe = null;
     this._setBusy(this._hadModels ? "Loading the models…" : "");
     // While the designer drives the viewer (start, setScene, setModels) its
     // step changes are echoes, not the user's: only the viewer's own keys and
@@ -310,8 +314,18 @@ export class Viewport {
   async _reloadModels() {
     if (!this.viewer) return;
     const models = this._modelBytes();
-    const first = !this._hadModels && Object.keys(models).length > 0;
-    this._hadModels = Object.keys(models).length > 0;
+    const names = Object.keys(models);
+    const first = !this._hadModels && names.length > 0;
+    const prev = this._modelNames;
+    // A first model, or a set that replaces every model shown (Open, or undo
+    // or redo of one), is framed by the step's camera, and so is a load during
+    // which what decides that camera changed. The camera signature is read
+    // here, before the project-changed that follows models-changed updates it,
+    // and kept across loads that a newer one supersedes.
+    if (!this._reframe) this._reframe = { sig: this._camSig, all: false };
+    this._reframe.all = this._reframe.all || first || (prev.length > 0 && !prev.some(n => names.includes(n)));
+    this._modelNames = names;
+    this._hadModels = names.length > 0;
     const token = ++this._loading;
     this._setBusy(this._hadModels ? "Loading the models…" : "");
     this._refreshToolbar();
@@ -327,12 +341,15 @@ export class Viewport {
       this._driving = false;
     }
     if (token !== this._loading) return;
+    const reframe = this._reframe;
+    this._reframe = null;
+    const keepCamera = !reframe.all && this._cameraSignature() === reframe.sig;
     this._setBusy("");
     this._driving = true;
     try {
-      // The scene may have changed while the models loaded; a first model is
-      // framed by the step's camera rather than the empty scene's.
-      this.viewer.setScene(this.state.project.toScene(), { keepCamera: !first });
+      // The scene may have changed while the models loaded; new models (or a
+      // new project) are framed by the step's camera rather than the old view.
+      this.viewer.setScene(this.state.project.toScene(), { keepCamera });
     } finally {
       this._driving = false;
     }
