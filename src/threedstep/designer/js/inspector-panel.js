@@ -515,8 +515,7 @@ export class InspectorPanel {
             const fit = step.camera && step.camera.fit ? step.camera.fit.slice() : [];
             const k = fit.indexOf(id);
             if (k >= 0) fit.splice(k, 1); else fit.push(id);
-            if (fit.length) st.setStepCamera(index, { fit }, "viewport");
-            else st.setStepCamera(index, null, "viewport");
+            st.setStepCamera(index, { fit }, "viewport");
           },
         });
         break;

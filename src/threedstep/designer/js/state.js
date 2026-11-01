@@ -379,14 +379,17 @@ export class ProjectState {
   }
 
   // A step's own camera: {position, target, fov, projection} captured from the
-  // view, {fit: [ids]}, or null to inherit the previous step's.
+  // view, {fit: [ids]}, or null to inherit the previous step's. A fit list
+  // keeps the step camera's fov and projection unless it names its own; an
+  // empty one leaves only those, as Delete does.
   setStepCamera(index, cam, origin = "visual") {
     if (!this._prepareMutation(origin)) return false;
     const next = this.project.clone();
     const step = next.steps[index];
     if (!step) return false;
+    const prev = step.camera;
     if (!cam) step.camera = null;
-    else if (cam.fit) step.camera = new CameraSpec({ fit: cam.fit.slice(), fov: cam.fov ?? null, projection: cam.projection ?? null });
+    else if (cam.fit) step.camera = withFit({ fov: cam.fov ?? (prev ? prev.fov : null), projection: cam.projection ?? (prev ? prev.projection : null) }, cam.fit.slice());
     else step.camera = new CameraSpec({ position: round3(cam.position), target: round3(cam.target), fov: round(cam.fov ?? 35, 2), projection: cam.projection || "orthographic" });
     return this._commit(origin, next, { kind: "steps", indices: [index] });
   }
