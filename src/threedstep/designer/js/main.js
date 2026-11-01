@@ -359,7 +359,8 @@ async function importFiles(files, editorPanel, showTab) {
       return;
     }
     const taken = [...state.project.assembly.models, ...state.models.keys()];
-    const result = await openImport(file, { taken, up: state.project.assembly.up, last: importChoices });
+    const fresh = !state.project.assembly.models.length;
+    const result = await openImport(file, { taken, up: state.project.assembly.up, fresh, last: importChoices });
     if (!result) continue;
     const name = state.addModel(result.model, { bytes: result.bytes, title: result.title, up: result.up });
     if (name) showTab("tab-parts");

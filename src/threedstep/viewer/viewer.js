@@ -9,7 +9,8 @@
  *                                    parameters, creates the viewer, reports the
  *                                    page height to an embedding page
  *   ThreeDStep.createViewer(el, o)   the viewer: returns a handle (goToStep,
- *                                    play, reset, setScene, setModels, getCamera,
+ *                                    play, reset, playAll, pause, setScene,
+ *                                    setModels, getCamera,
  *                                    setCamera, fit, setStyle, setProjection,
  *                                    pick, setSelection, previewPlacement,
  *                                    screenshot, resize, dispose, ...; in editor
@@ -43,6 +44,8 @@
     prev: "Previous",
     next: "Next",
     play: "Play",
+    playAll: "Play all steps",
+    pause: "Pause",
     reset: "Reset",
     resetView: "Reset view",
     fullscreen: "Fullscreen",
@@ -55,12 +58,14 @@
     stepOf: "Step {n} of {total}",
     counter: "{n} / {total}",
     installed: "In this step: ",
-    hintMouse: "Drag to rotate · Scroll to zoom",
+    hintMouse: "Drag to rotate · Right-drag to pan · Scroll to zoom · Double-click to center",
     hintMouseInactive: "Click to interact",
     hintMouseActive: "Drag to rotate · Scroll to zoom · Esc to release",
     hintTouch: "Tap to interact",
     hintTouchActive: "Drag to rotate · Pinch to zoom",
-    credit: "3DStep",
+    credit: "Created with {link}",
+    creditName: "3DStep",
+    creditUrl: "https://3dstep.isiks.tech",
     noWebgl: "This 3D view needs WebGL",
     openTab: "Open in a new tab",
     loading: "Loading the 3D view…",
@@ -90,7 +95,6 @@
     transitionMs: 600,
     playMs: 900,
     autoplay: false,
-    hintAutohide: 4,
     fullscreenButton: true,
     styleToggle: false,
     projectionToggle: false
@@ -123,7 +127,7 @@
   };
   var TOKEN_NAMES = Object.keys(LIGHT);
   var DEFAULT_DIR_Z = [0.62, -0.72, 0.52];   // front-right-above, Z-up (SPEC 9.4)
-  var DEFAULT_DIR_Y = [0.62, 0.52, -0.72];   // the Y-up equivalent
+  var DEFAULT_DIR_Y = [0.62, 0.52, 0.72];    // the same view Y-up, where the front is +Z
   var EDGE_CLASS = { none: 0, part: 1, highlight: 2, arrow: 3, selected: 4 };
   var MAX_KERNEL = 36;
 
@@ -769,6 +773,7 @@
     max: '<svg class="i-max"' + SVG_ATTR + '><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>',
     min: '<svg class="i-min"' + SVG_ATTR + '><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3"/></svg>',
     play: '<svg class="i-play"' + SVG_ATTR + '><path d="M7 4l12 8-12 8z"/></svg>',
+    pause: '<svg class="i-pause"' + SVG_ATTR + '><path d="M8 5v14M16 5v14"/></svg>',
     reset: '<svg class="i-reset"' + SVG_ATTR + '><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>',
     home: '<svg' + SVG_ATTR + '><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>',
     prev: '<svg' + SVG_ATTR + '><path d="M15 5l-7 7 7 7"/></svg>',
@@ -852,8 +857,10 @@
     counter.setAttribute("aria-live", "off");
     var hudNav = el("span", "tds-hud-nav");
     var btnHudPrev = button("tds-btn-prev", STR.prev, ICONS.prev);
+    var btnHudPlayAll = button("tds-btn-playall", STR.playAll, ICONS.play + ICONS.pause);
     var btnHudNext = button("tds-btn-next", STR.next, ICONS.next);
     hudNav.appendChild(btnHudPrev);
+    hudNav.appendChild(btnHudPlayAll);
     hudNav.appendChild(btnHudNext);
     hudLeft.appendChild(counter);
     hudLeft.appendChild(hudNav);
@@ -871,18 +878,20 @@
     hud.appendChild(hudLeft);
     hud.appendChild(hudRight);
     var caption = el("div", "tds-caption");
-    var hint = el("div", "tds-hint");
-    var hintText = el("span", "tds-hint-text");
-    var credit = el("span", "tds-credit", STR.credit);
-    hint.appendChild(hintText);
-    hint.appendChild(credit);
+    // The bar under the view (beside the panel) or under the panel (stacked):
+    // how to steer the view, and the credit.
+    var bar = el("div", "tds-bar");
+    var hintText = el("span", "tds-hint");
+    var credit = el("span", "tds-credit", escapeHtml(STR.credit).replace("{link}",
+      '<a href="' + STR.creditUrl + '" target="_blank" rel="noopener">' + escapeHtml(STR.creditName) + "</a>"));
+    bar.appendChild(hintText);
+    bar.appendChild(credit);
     var fallback = el("div", "tds-fallback");
     fallback.hidden = true;
     view.appendChild(canvas);
     view.appendChild(overlay);
     view.appendChild(labelsBox);
     view.appendChild(hud);
-    view.appendChild(hint);
     view.appendChild(fallback);
 
     var panel = el("aside", "tds-panel");
@@ -914,9 +923,11 @@
     progress.setAttribute("role", "progressbar");
     var progressBar = el("div", "tds-progress-bar");
     progress.appendChild(progressBar);
+    var btnPlayAll = button("tds-btn-playall", STR.playAll, ICONS.play + ICONS.pause);
     var btnNext = button("tds-btn-next", STR.next, "<span>" + STR.next + "</span>" + ICONS.next);
     nav.appendChild(btnPrev);
     nav.appendChild(progress);
+    nav.appendChild(btnPlayAll);
     nav.appendChild(btnNext);
     panelIn.appendChild(head);
     panelIn.appendChild(stepList);
@@ -928,6 +939,7 @@
     main.appendChild(caption);
     main.appendChild(panel);
     container.appendChild(main);
+    container.appendChild(bar);
 
     // ── State ────────────────────────────────────────────────────────
     var states = [];           // folded steps
@@ -1027,6 +1039,7 @@
         counter.textContent = "";
         caption.textContent = "";
         btnPrev.disabled = btnNext.disabled = btnHudPrev.disabled = btnHudNext.disabled = true;
+        btnPlayAll.disabled = btnHudPlayAll.disabled = true;
         progressBar.style.width = "0";
         return;
       }
@@ -1052,6 +1065,8 @@
       caption.textContent = st.title;
       btnPrev.disabled = btnHudPrev.disabled = i <= 0;
       btnNext.disabled = btnHudNext.disabled = i >= total - 1;
+      // Play all: something to play from the first step to the last.
+      btnPlayAll.disabled = btnHudPlayAll.disabled = total < 2 && !hasVisibleMoves(states[0]);
       progressBar.style.width = ((i + 1) / total * 100) + "%";
       progress.setAttribute("aria-valuenow", String(i + 1));
       btnPlay.disabled = !hasVisibleMoves(st);
@@ -1100,23 +1115,13 @@
       win.setTimeout(finish, 420);
     }
 
-    // ── Hint pill ────────────────────────────────────────────────────
+    // ── Hint (in the bar, follows the activation) ────────────────────
     var touchUI = !!(win.matchMedia && win.matchMedia("(pointer: coarse)").matches);
     if (touchUI) container.classList.add("is-touch");
-    var hintDone = false, hintTimer = null;
     function updateHint() {
       if (touchUI) hintText.textContent = activation.active ? STR.hintTouchActive : STR.hintTouch;
       else if (activation.standalone && !embedded) hintText.textContent = activation.active ? STR.hintMouse : STR.hintMouseInactive;
       else hintText.textContent = activation.active ? STR.hintMouseActive : STR.hintMouseInactive;
-    }
-    function hideHint() {
-      if (hintDone || !(behavior.hintAutohide > 0)) return;
-      hintDone = true;
-      hint.classList.add("hf");
-      win.setTimeout(function () { hint.classList.add("hh"); hint.classList.remove("hf"); requestRender(); }, 380);
-    }
-    function hintCountdown() {
-      if (hintTimer === null && behavior.hintAutohide > 0) hintTimer = win.setTimeout(hideHint, behavior.hintAutohide * 1000);
     }
 
     // ── Activation (SPEC 9.9) ────────────────────────────────────────
@@ -1192,7 +1197,8 @@
         requestRender();
         if (handle.onCamera) { try { handle.onCamera(getCamera()); } catch (e) { /* ignore */ } }
       });
-      controls.addEventListener("start", function () { activation.interaction(); hideHint(); });
+      // Steering the view stops Play all: its next camera flight would undo it.
+      controls.addEventListener("start", function () { activation.interaction(); stopPlayAll(); });
 
       raycaster = new THREE.Raycaster();
       raycaster.layers.enableAll();
@@ -1675,9 +1681,17 @@
 
     // Fly from the current camera to `cam` over `ms` (0 snaps).
     // The flight's projection is `flightProjection`, so setProjection() can retarget a running flight.
-    var camTween = null, flightProjection = "orthographic";
+    // A flight cut short by another still calls its `done`: the camera got somewhere.
+    var camTween = null, camDone = null, flightProjection = "orthographic";
     function flyTo(cam, ms, done) {
-      if (camTween) { removeTween(camTween); camTween = null; controls.enabled = true; }
+      if (camTween) {
+        removeTween(camTween);
+        camTween = null;
+        controls.enabled = true;
+        var cut = camDone;
+        camDone = null;
+        if (cut) cut();
+      }
       var projection = cam.projection === "perspective" ? "perspective" : "orthographic";
       var from = getCamera();
       var switching = (projection === "perspective") !== (camera === cameraP);
@@ -1691,6 +1705,7 @@
       setFlying(true);
       controls.enabled = false;
       flightProjection = projection;
+      camDone = done || null;
       camTween = addTween(ms, function (k) {
         var e = easeInOut(k);
         setCameraNow({
@@ -1700,6 +1715,7 @@
         });
       }, function () {
         camTween = null;
+        camDone = null;
         controls.enabled = true;
         controls.update();
         setFlying(false);
@@ -1746,6 +1762,9 @@
     // ── State application ────────────────────────────────────────────
     var stateTween = null;
     var playTween = null;
+    var leavingTween = null;   // Next: the moves of the step being left, before the transition
+    var viewStep = -1;         // the step whose transition has finished (the view shows it)
+    var applyGen = 0;
     function targetFor(part, st) {
       var p = st.placed[part.id];
       var visible = !!st.visible[part.id];
@@ -1771,6 +1790,7 @@
       applyPlacement(part);
       refreshPartMaterials(part);
     }
+    // `done` runs once the parts and the camera have both arrived.
     function applyState(i, animate, done) {
       var st = states[i];
       if (!st || !modelsLoaded) { if (done) done(); return; }
@@ -1779,6 +1799,15 @@
       // copy its own target over the new pose; the transition starts from
       // the pose it reached instead
       if (playTween) { removeTween(playTween); playTween = null; }
+      leavingTween = null;
+      viewStep = -1;
+      var gen = ++applyGen, waiting = 2;
+      var settle = function () {
+        // a transition overtaken by the next one has arrived nowhere
+        if (--waiting > 0 || gen !== applyGen) return;
+        viewStep = i;
+        if (done) done();
+      };
       var ms = animate && !reducedMotion() ? behavior.transitionMs : 0;
       var cam = resolveCamera(i);
       var moving = [];
@@ -1800,15 +1829,15 @@
         moving.forEach(function (m) { snapPart(m.part, m.to); });
         updateAutoArrows();
         stateTween = null;
-        if (done) done();
+        settle();
         requestRender();
       };
       if (ms <= 0 || !moving.length) {
-        flyTo(cam, ms / (moving.length ? 1 : 1), null);
+        flyTo(cam, ms, settle);
         finish();
         return;
       }
-      flyTo(cam, ms, null);
+      flyTo(cam, ms, settle);
       stateTween = addTween(ms, function (k) {
         var e = easeInOut(k);
         moving.forEach(function (m) {
@@ -1825,33 +1854,19 @@
       }, finish);
     }
 
-    // Play / Reset (SPEC 6): the parts moved in this step tween between their
-    // offsets and the assembled pose.
-    function playMoves(toAssembled, animate) {
-      var st = states[current];
-      if (!st) return;
+    // Tween parts ([{part, to: {offset, quat}}]) from where they are over
+    // `ms` (0 snaps), as the play tween; `done` runs once they are there.
+    function tweenMoves(moving, ms, done) {
       if (playTween) { removeTween(playTween); playTween = null; }
-      var ms = animate && !reducedMotion() ? behavior.playMs : 0;
-      var moving = [];
-      partList.forEach(function (part) {
-        var p = st.placed[part.id];
-        if (!p || !st.visible[part.id]) return;
-        var tgt = toAssembled
-          ? { offset: new THREE.Vector3(), quat: new THREE.Quaternion() }
-          : { offset: new THREE.Vector3().fromArray(p.offset), quat: quatFromRotate(p.rotate) };
-        moving.push({ part: part, from: { offset: part.offset.clone(), quat: part.quat.clone() }, to: tgt });
-      });
-      played = toAssembled;
-      container.classList.toggle("is-played", played);
-      btnPlay.setAttribute("aria-label", played ? STR.reset : STR.play);
-      btnPlay.title = played ? STR.reset : STR.play;
+      moving.forEach(function (m) { m.from = { offset: m.part.offset.clone(), quat: m.part.quat.clone() }; });
       var finish = function () {
         moving.forEach(function (m) { m.part.offset.copy(m.to.offset); m.part.quat.copy(m.to.quat); applyPlacement(m.part); });
         updateAutoArrows();
         playTween = null;
         requestRender();
+        if (done) done();
       };
-      if (ms <= 0) { finish(); return; }
+      if (!(ms > 0)) { finish(); return null; }
       playTween = addTween(ms, function (k) {
         var e = easeInOut(k);
         moving.forEach(function (m) {
@@ -1861,6 +1876,47 @@
         });
         updateAutoArrows();
       }, finish);
+      return playTween;
+    }
+
+    // Play / Reset (SPEC 6): the parts moved in this step tween between their
+    // offsets and the assembled pose.
+    function playMoves(toAssembled, animate, done) {
+      var st = states[current];
+      if (!st) return;
+      // A Next still assembling the step it left: show this step first.
+      if (leavingTween) applyState(current, false);
+      var ms = animate && !reducedMotion() ? behavior.playMs : 0;
+      var moving = [];
+      partList.forEach(function (part) {
+        var p = st.placed[part.id];
+        if (!p || !st.visible[part.id]) return;
+        var tgt = toAssembled
+          ? { offset: new THREE.Vector3(), quat: new THREE.Quaternion() }
+          : { offset: new THREE.Vector3().fromArray(p.offset), quat: quatFromRotate(p.rotate) };
+        moving.push({ part: part, to: tgt });
+      });
+      played = toAssembled;
+      container.classList.toggle("is-played", played);
+      btnPlay.setAttribute("aria-label", played ? STR.reset : STR.play);
+      btnPlay.title = played ? STR.reset : STR.play;
+      tweenMoves(moving, ms, done);
+    }
+
+    // Next: before the transition, the parts the step being left moved go
+    // where the next step has them (assembled, or hidden after), as Play would
+    // put them; nothing moves when that step was played. A part the next step
+    // moves itself goes with the transition.
+    function leavingMoves(from, to) {
+      var out = [];
+      var identity = new THREE.Quaternion();
+      partList.forEach(function (part) {
+        if (!from.placed[part.id] || !from.visible[part.id] || !part.visible) return;
+        if (to.placed[part.id] && to.visible[part.id]) return;
+        if (part.offset.lengthSq() < 1e-12 && part.quat.angleTo(identity) < 1e-6) return;
+        out.push({ part: part, to: { offset: new THREE.Vector3(), quat: identity.clone() } });
+      });
+      return out;
     }
 
     // ── Arrows (SPEC 9.7) ────────────────────────────────────────────
@@ -2053,10 +2109,7 @@
       if (!labels.length || !webgl) return;
       var w = view.clientWidth, h = view.clientHeight;
       var hudH = behavior.controls === "none" ? 0 : 48;
-      // Keep the bottom strip of the hint pill (and the credit it shrinks to) clear,
-      // as the HUD's strip is at the top; the pill is not displayed in the designer
-      // or with controls = "none", and then only the 4 px margin is kept.
-      var footH = hint.offsetHeight ? h - hint.offsetTop + 4 : 4;
+      var footH = 4;
       var cx = w / 2, cy = h / 2;
       labels.forEach(function (l) {
         // A label attached to a hidden part goes with it, as an arrow attached to it does.
@@ -2200,22 +2253,40 @@
       }
       return -1;
     }
+    // opts: {animate (default true)}; Play all passes {auto: true, done}, any
+    // other step change stops it.
+    var navSeq = 0;
     function goToStep(ref, opts) {
       opts = opts || {};
       var i = stepIndex(ref);
       if (i < 0 || !states.length) return;
       if (i === current) return;
+      if (!opts.auto) stopPlayAll();
       var animate = opts.animate !== false && current >= 0 && !editor;
-      var changed = i !== current;
+      var prev = current;
+      var token = ++navSeq;
       current = i;
       played = false;
       container.classList.remove("is-played");
       animatePanel(function () { renderPanelStep(i); });
       if (modelsLoaded || !webgl) {
         try {
-          applyState(i, animate, function () {
-            if (behavior.autoplay && !editor && changed && hasVisibleMoves(states[i])) playMoves(true, true);
-          });
+          var arrived = function () {
+            if (token !== navSeq) return;
+            if (behavior.autoplay && !editor && !opts.auto && hasVisibleMoves(states[i])) playMoves(true, true);
+            if (opts.done) opts.done();
+          };
+          // Next: the step being left plays its moves first, then the view
+          // moves on (the camera flies once the parts are in place).
+          var leaving = animate && i === prev + 1 && viewStep === prev && !reducedMotion() ? leavingMoves(states[prev], states[i]) : [];
+          if (leaving.length) {
+            leavingTween = tweenMoves(leaving, behavior.playMs, function () {
+              leavingTween = null;
+              if (token === navSeq) applyState(i, true, arrived);
+            });
+          } else {
+            applyState(i, animate, arrived);
+          }
         } catch (e) {
           fail(e);
         }
@@ -2223,15 +2294,70 @@
       if (handle.onStep) { try { handle.onStep(i, states[i]); } catch (e) { /* ignore */ } }
       requestRender();
     }
+
+    // ── Play all: every step from this one, its moves then the next ──
+    var playAllTimer = null, playingAll = false;
+    function setPlayingAll(on) {
+      playingAll = on;
+      container.classList.toggle("is-playing-all", on);
+      [btnPlayAll, btnHudPlayAll].forEach(function (b) {
+        b.setAttribute("aria-label", on ? STR.pause : STR.playAll);
+        b.title = on ? STR.pause : STR.playAll;
+      });
+    }
+    function stopPlayAll() {
+      if (playAllTimer !== null) { win.clearTimeout(playAllTimer); playAllTimer = null; }
+      if (playingAll) setPlayingAll(false);
+    }
+    // A pause, so each pose is seen before the next motion.
+    function playAllWait(ms, then) {
+      playAllTimer = win.setTimeout(function () {
+        playAllTimer = null;
+        if (playingAll && !disposed) then();
+      }, ms);
+    }
+    function playAllStep() {
+      if (!playingAll) return;
+      var hold = Math.max(400, behavior.playMs * 0.6);
+      var next = function () {
+        if (current >= states.length - 1) { stopPlayAll(); return; }
+        goToStep(current + 1, { auto: true, done: playAllStep });
+      };
+      if (!played && hasVisibleMoves(states[current])) {
+        playAllWait(hold, function () {
+          playMoves(true, true, function () { if (playingAll) playAllWait(hold, next); });
+        });
+      } else {
+        playAllWait(hold, next);
+      }
+    }
+    // Once the step's transition is over (a Next may still be under way).
+    function whenSettled(then) {
+      if (!webgl || (viewStep === current && !stateTween && !leavingTween)) then();
+      else playAllWait(100, function () { whenSettled(then); });
+    }
+    function playAll() {
+      if (playingAll) { stopPlayAll(); return; }
+      if (!states.length || !handle.ready) return;
+      setPlayingAll(true);
+      // At the end (the last step, played): start over.
+      var atEnd = current >= states.length - 1 && (played || !hasVisibleMoves(states[current]));
+      if (atEnd && current > 0) { goToStep(0, { auto: true, done: playAllStep }); return; }
+      if (atEnd) playMoves(false, false);
+      whenSettled(playAllStep);
+    }
     // No steps: the panel says so, and every part shows assembled and
     // unhighlighted, without arrows or labels, as the boot leaves a project
     // without steps (goToStep has no step to apply).
     function showNoSteps() {
+      stopPlayAll();
       current = -1;
+      viewStep = -1;
       played = false;
       container.classList.remove("is-played");
       if (stateTween) { removeTween(stateTween); stateTween = null; }
       if (playTween) { removeTween(playTween); playTween = null; }
+      leavingTween = null;
       renderPanelStep(-1);
       clearArrows();
       clearLabels();
@@ -2254,7 +2380,6 @@
     on(canvas, "pointerdown", function (e) {
       pointerStart = { x: e.clientX, y: e.clientY, t: Date.now(), type: e.pointerType, moved: false };
       activation.pointerDown(true, e.pointerType);
-      hideHint();
       try { container.focus({ preventScroll: true }); } catch (err) { /* ignore */ }
     }, { capture: true });
     on(canvas, "pointermove", function (e) {
@@ -2310,6 +2435,7 @@
     }, { passive: true });
     [btnPrev, btnHudPrev].forEach(function (b) { on(b, "click", function () { goToStep(current - 1, {}); }); });
     [btnNext, btnHudNext].forEach(function (b) { on(b, "click", function () { goToStep(current + 1, {}); }); });
+    [btnPlayAll, btnHudPlayAll].forEach(function (b) { on(b, "click", function () { playAll(); }); });
     on(btnPlay, "click", function () { if (played) resetMoves(); else play(); });
     on(btnHome, "click", function () { resetView(); });
     on(btnZoomIn, "click", function () { dolly(1 / 1.25); });
@@ -2384,8 +2510,8 @@
       if (!webgl) return;
       flyTo(homeCamera(), behavior.transitionMs / 2, null);
     }
-    function play() { playMoves(true, true); }
-    function resetMoves() { playMoves(false, true); }
+    function play() { stopPlayAll(); playMoves(true, true); }
+    function resetMoves() { stopPlayAll(); playMoves(false, true); }
 
     // ── Fullscreen (PinConnect's new-tab fallback) ───────────────────
     function fsElement() { return doc.fullscreenElement || doc.webkitFullscreenElement || null; }
@@ -2443,12 +2569,9 @@
         var vis = entries.some(function (en) { return en.isIntersecting; });
         if (vis && !visible) { visible = true; requestRender(); }
         if (!vis && visible) { visible = false; activation.visibility(false); }
-        if (vis) hintCountdown();
       });
       io.observe(container);
       unloads.push(function () { io.disconnect(); });
-    } else {
-      hintCountdown();
     }
     on(doc, "visibilitychange", function () { if (doc.visibilityState === "visible") requestRender(); });
     if (win.matchMedia) {
@@ -2611,7 +2734,7 @@
       if (rafId) win.cancelAnimationFrame(rafId);
       unloads.forEach(function (f) { try { f(); } catch (e) { /* ignore */ } });
       activation.dispose();
-      if (hintTimer) win.clearTimeout(hintTimer);
+      stopPlayAll();
       if (watchdog) win.clearTimeout(watchdog);
       clearArrows();
       clearLabels();
@@ -2638,6 +2761,9 @@
       getState: function () { return states[current] || null; },
       play: play,
       reset: resetMoves,
+      playAll: function () { if (!playingAll) playAll(); },
+      pause: stopPlayAll,
+      isPlayingAll: function () { return playingAll; },
       resetView: resetView,
       setScene: setScene,
       setModels: setModels,

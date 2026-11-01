@@ -6,14 +6,15 @@
 // state.setMoves commits them (one undo step per drag) in the step the drag
 // began in, and drops them when the project or the step changed meanwhile
 // (the keys that would change either are held back during a drag); Escape
-// mid-drag puts the parts back. Shift snaps to 1 mm and 5 degrees; a readout
-// follows the pointer.
+// mid-drag puts the parts back. A drag moves in steps of 1 mm and turns in
+// steps of 15 degrees; holding Alt (Option) drags freely. A readout follows
+// the pointer.
 
 import { DEG, composePlacement, isIdentityQuat, isZero, quatAxisAngle, roundTo, snapQuat, snapVector, vdot, vsub } from "./geometry.js";
 import { mergeEntries, pivotOf, unitsFor } from "./placement.js";
 
 export const SNAP_MM = 1;
-export const SNAP_DEG = 5;
+export const SNAP_DEG = 15;
 
 // The keys held back during a drag: undo, redo and duplicate the step (with
 // Ctrl or Cmd), and outside a field Delete and the step keys.
@@ -38,7 +39,7 @@ export class GizmoTools {
     this.units = [];
     this.P = null;           // the pivot's start position for the drag in progress
     this.dragging = false;
-    this.shift = false;
+    this.free = false;       // Alt is down: no snapping
     this.last = null;        // {translate, rotate, results} of the drag in progress
     this.dragFrom = null;    // {project, step} the drag in progress began from
     this.pointer = { x: 0, y: 0 };
@@ -47,7 +48,17 @@ export class GizmoTools {
     for (const ev of ["selection-changed", "project-changed", "step-changed", "models-changed"]) {
       this.state.on(ev, () => { if (this.mode && !this.dragging) this._attach(); });
     }
-    window.addEventListener("keydown", (e) => { if (e.key === "Shift") this._setShift(true); });
+    // Alt alone would also move the focus to the browser's menu (Windows)
+    // when it comes back up: not while Move or Rotate is the tool, outside
+    // a field (which keeps its keys).
+    const onAlt = (down) => (e) => {
+      if (e.key !== "Alt") return;
+      this._setFree(down);
+      const t = e.target;
+      const field = t && t.matches && (t.matches("input, textarea, select") || t.isContentEditable);
+      if (this.mode && !field) e.preventDefault();
+    };
+    window.addEventListener("keydown", onAlt(true));
     // During a drag no key may change the project or the step the drag
     // commits into: capture undo, redo, Ctrl+D, Delete and the step keys
     // (main.js's and the viewer's own) before anything else sees them. Escape
@@ -57,13 +68,13 @@ export class GizmoTools {
       e.stopPropagation();
       e.preventDefault();
     }, true);
-    window.addEventListener("keyup", (e) => { if (e.key === "Shift") this._setShift(false); });
-    window.addEventListener("blur", () => this._setShift(false));
+    window.addEventListener("keyup", onAlt(false));
+    window.addEventListener("blur", () => this._setFree(false));
     // Capture phase: before the controls' own pointermove handler, so the
-    // Shift state of the event itself is what that handler's drag uses.
+    // Alt state of the event itself is what that handler's drag uses.
     viewport.viewerEl.addEventListener("pointermove", (e) => {
       this.pointer = { x: e.clientX, y: e.clientY };
-      if (e.shiftKey !== this.shift) this._setShift(e.shiftKey);
+      if (e.altKey !== this.free) this._setFree(e.altKey);
     }, { passive: true, capture: true });
   }
 
@@ -120,9 +131,9 @@ export class GizmoTools {
     if (this.mode) this._attach();
   }
 
-  _setShift(on) {
-    if (this.shift === on) return;
-    this.shift = on;
+  _setFree(on) {
+    if (this.free === on) return;
+    this.free = on;
     if (this.dragging) this._onDrag();
   }
 
@@ -203,7 +214,7 @@ export class GizmoTools {
   }
 
   // The delta of the drag in progress: the pivot's position and rotation
-  // against where it started, snapped with Shift, previewed on every unit.
+  // against where it started, snapped unless Alt is down, previewed on every unit.
   _onDrag() {
     if (!this.dragging || !this.P) return;
     const p = this.pivot.position;
@@ -211,7 +222,7 @@ export class GizmoTools {
     let rotate = [this.pivot.quaternion.x, this.pivot.quaternion.y, this.pivot.quaternion.z, this.pivot.quaternion.w];
     if (this.mode === "translate") rotate = [0, 0, 0, 1];
     else translate = [0, 0, 0];
-    if (this.shift) {
+    if (!this.free) {
       translate = snapVector(translate, SNAP_MM);
       rotate = snapQuat(rotate, SNAP_DEG);
       this.pivot.position.set(this.P[0] + translate[0], this.P[1] + translate[1], this.P[2] + translate[2]);
@@ -242,7 +253,8 @@ export class GizmoTools {
   }
 
   _readout(translate, rotate) {
-    if (this.mode === "translate") return `Δ ${translate.map(fmt1).join(", ")} mm${this.shift ? " · snapped" : ""}`;
+    const how = this.free ? " · free" : ` · ${this.mode === "translate" ? `${SNAP_MM} mm` : `${SNAP_DEG}°`} steps (Alt: free)`;
+    if (this.mode === "translate") return `Δ ${translate.map(fmt1).join(", ")} mm${how}`;
     const { axis, angle } = quatAxisAngle(rotate);
     const names = ["X", "Y", "Z"];
     let name = "", sign = 1;
@@ -252,7 +264,7 @@ export class GizmoTools {
       sign = Math.sign(axis[major]) || 1;
     }
     const deg = angle / DEG * sign;
-    return `${fmt1(deg)}°${name ? ` about ${name}` : ""}${this.shift ? " · snapped" : ""}`;
+    return `${fmt1(deg)}°${name ? ` about ${name}` : ""}${how}`;
   }
 
   // Release: one setMoves for the drag, or nothing when nothing moved.

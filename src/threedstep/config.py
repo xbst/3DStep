@@ -913,7 +913,6 @@ class ThemeBehavior:
     transition_ms: int = 600               # step transition and camera flight; 0 snaps
     play_ms: int = 900                     # duration of Play
     autoplay: bool = False                 # play each step's moves after the transition
-    hint_autohide: float = 4.0             # seconds before the hint pill shrinks to the credit; 0 keeps it
     fullscreen_button: bool = True         # fullscreen button in the HUD (a new tab where unavailable)
     style_toggle: bool = False             # HUD button to switch line art / shaded
     projection_toggle: bool = False        # HUD button to switch orthographic / perspective
@@ -939,7 +938,6 @@ _BEHAVIOR_CLAMPS: dict[str, tuple[float | None, float | None]] = {
     "arrow_scale": (0.0, None),
     "transition_ms": (0, None),
     "play_ms": (0, None),
-    "hint_autohide": (0.0, None),
 }
 
 

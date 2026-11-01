@@ -816,18 +816,15 @@ html, body {
 .viewport.is-dragging { cursor: grabbing; }
 .viewport.is-dragging .vp-viewer canvas { cursor: grabbing; }
 
-/* The axis triad: bottom right, above the viewer's HUD. */
-.vp-triad {
+/* The view cube: bottom right, above the viewer's HUD. */
+.vp-cube {
   position: absolute;
-  right: 10px;
-  bottom: 54px;
+  right: 4px;
+  bottom: 46px;
   z-index: 3;
-  width: 96px;
-  height: 96px;
-  cursor: pointer;
-  opacity: 0.9;
+  width: 140px;
+  height: 140px;
 }
-.vp-triad:hover { opacity: 1; }
 
 /* Labels are selectable in the editor (the viewer tags them); the selected
    label and the selected arrow's tail label get the accent frame. */

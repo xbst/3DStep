@@ -264,12 +264,16 @@ function modelSummary(model) {
 }
 
 // Import one file. Resolves to {model, bytes, title} or null when cancelled.
-// options: {taken: file names in use, up: the project's up axis, last: the
+// options: {taken: file names in use, up: the project's up axis, fresh: the
+// project has no models yet (its first model sets its up axis), last: the
 // previous import's choices to start from}.
-export function openImport(file, { taken = [], up = "z", last = {} } = {}) {
+export function openImport(file, { taken = [], up = "z", fresh = false, last = {} } = {}) {
   const lower = file.name.toLowerCase();
   const isStep = lower.endsWith(".step") || lower.endsWith(".stp");
-  return isStep ? importStepDialog(file, { taken, up, last }) : importGlbDialog(file, { taken, up, last });
+  // A first STEP model is Y-up unless chosen otherwise: Fusion, where most
+  // of them come from, is.
+  if (isStep) return importStepDialog(file, { taken, up: fresh ? (last.up || "y") : up, last });
+  return importGlbDialog(file, { taken, up, last });
 }
 
 function importStepDialog(file, { taken, up, last }) {
@@ -312,7 +316,7 @@ function importStepDialog(file, { taken, up, last }) {
         `<span class="hint">After reading you can split single nodes into their bodies.</span>` +
         `<label for="imp-simplify">Simplify</label><span class="inline">to <input id="imp-simplify" class="field-input" type="number" min="5" max="100" step="5" value="${opts.simplify}"> % of the triangles</span>` +
         `<label for="imp-up">Up axis</label><select id="imp-up" class="field-select">` +
-        `<option value="z"${opts.up === "z" ? " selected" : ""}>Z (most CAD tools)</option><option value="y"${opts.up === "y" ? " selected" : ""}>Y (Fusion, glTF)</option></select>` +
+        `<option value="y"${opts.up === "y" ? " selected" : ""}>Y (Fusion, glTF)</option><option value="z"${opts.up === "z" ? " selected" : ""}>Z (most other CAD tools)</option></select>` +
         `</div>` +
         (error ? `<div class="dialog-error">${esc(error)}</div>` : "") +
         `<div class="modal-foot"><span class="spacer"></span>` +

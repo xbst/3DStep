@@ -8,12 +8,13 @@
  * renderer emits (`--panel-max`, `--font-scale`, `--view-aspect`,
  * `--view-min-h`, `--view-max-h`), again with defaults.
  *
- * Layout (SPEC 9.2): .tds > .tds-main > .tds-view + .tds-panel. The view and the
- * panel sit side by side; `.tds.is-stacked` (set by the viewer from the root's
- * width and `data-panel-stack-breakpoint`) puts the panel under the view;
- * `[data-placement="overlay"]` floats the text over the view; `.is-fs` fills the
- * screen. Class prefix: `tds-`. State classes: is-stacked, is-fs, is-active,
- * is-flying, is-ready, is-touch, is-played.
+ * Layout (SPEC 9.2): .tds > .tds-main (.tds-view + .tds-panel) + .tds-bar. The
+ * view and the panel sit side by side, the bar (hint and credit) under the view;
+ * `.tds.is-stacked` (set by the viewer from the root's width and
+ * `data-panel-stack-breakpoint`) puts the panel under the view and the bar under
+ * the panel; `[data-placement="overlay"]` floats the text over the view; `.is-fs`
+ * fills the screen. Class prefix: `tds-`. State classes: is-stacked, is-fs,
+ * is-active, is-flying, is-ready, is-touch, is-played, is-playing-all.
  */
 
 /* ── Tokens with their defaults (light), then dark ─────────────────── */
@@ -24,8 +25,6 @@
   --tds-tip-bg: var(--tip-bg, #ffffff);
   --tds-tip-border: var(--tip-border, #d0d0d0);
   --tds-tip-shadow: var(--tip-shadow, rgba(0, 0, 0, .12));
-  --tds-hint-bg: var(--hint-bg, rgba(30, 30, 30, .75));
-  --tds-hint-text: var(--hint-text, #fff);
   --tds-divider: var(--divider, #e5e5e5);
   --tds-desc: var(--desc-color, #555);
   --tds-scroll-thumb: var(--scroll-thumb, rgba(0, 0, 0, .22));
@@ -52,8 +51,6 @@
     --tds-tip-bg: var(--tip-bg, #1e1e1e);
     --tds-tip-border: var(--tip-border, #3a3a3a);
     --tds-tip-shadow: var(--tip-shadow, rgba(0, 0, 0, .4));
-    --tds-hint-bg: var(--hint-bg, rgba(240, 240, 240, .85));
-    --tds-hint-text: var(--hint-text, #131313);
     --tds-divider: var(--divider, #333);
     --tds-desc: var(--desc-color, #aaa);
     --tds-scroll-thumb: var(--scroll-thumb, rgba(255, 255, 255, .20));
@@ -79,8 +76,6 @@
   --tds-tip-bg: var(--tip-bg, #1e1e1e);
   --tds-tip-border: var(--tip-border, #3a3a3a);
   --tds-tip-shadow: var(--tip-shadow, rgba(0, 0, 0, .4));
-  --tds-hint-bg: var(--hint-bg, rgba(240, 240, 240, .85));
-  --tds-hint-text: var(--hint-text, #131313);
   --tds-divider: var(--divider, #333);
   --tds-desc: var(--desc-color, #aaa);
   --tds-scroll-thumb: var(--scroll-thumb, rgba(255, 255, 255, .20));
@@ -189,8 +184,9 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
   z-index: 3;
 }
 
-/* The panel: absolutely positioned beside the view so its height is the view's
-   and it scrolls inside; the row pads for it. Stacked, it goes back in flow. */
+/* The panel: absolutely positioned beside the view and the bar under it (the
+   root is its containing block), so its height is theirs and it scrolls inside;
+   the row and the bar make room for it. Stacked, it goes back in flow. */
 .tds-panel {
   position: absolute;
   top: 0;
@@ -205,11 +201,16 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
   scrollbar-width: thin;
   scrollbar-color: var(--tds-scroll-thumb) var(--tds-scroll-track);
 }
-.tds[data-placement="right"][data-controls="full"]:not(.is-stacked):not(.is-fs):not(.is-editor) .tds-main { padding-right: min(var(--panel-max, min(360px, 40vw)), 40vw); }
+.tds[data-placement="right"][data-controls="full"]:not(.is-stacked):not(.is-fs):not(.is-editor) .tds-main { position: static; padding-right: min(var(--panel-max, min(360px, 40vw)), 40vw); }
+.tds[data-placement="right"][data-controls="full"]:not(.is-stacked):not(.is-fs):not(.is-editor) .tds-bar { margin-right: min(var(--panel-max, min(360px, 40vw)), 40vw); }
 .tds-panel::-webkit-scrollbar { width: 8px; }
 .tds-panel::-webkit-scrollbar-thumb { background: var(--tds-scroll-thumb); border-radius: 4px; }
 .tds-panel::-webkit-scrollbar-track { background: var(--tds-scroll-track); }
-.tds-panel-in { padding: 14px 16px 0; }
+/* A column at least as tall as the panel: the text takes the slack, so
+   Previous and Next sit at the bottom however long the step's text is. */
+.tds-panel-in { display: flex; flex-direction: column; min-height: 100%; padding: 14px 16px 0; }
+.tds-panel-in > * { flex: none; }
+.tds-panel-in > .tds-text { flex: 1 0 auto; }
 
 /* Stacked (narrow, or panel_placement = below): panel under the view. */
 .tds.is-stacked .tds-main, .tds[data-placement="below"] .tds-main { flex-direction: column; padding-right: 0; }
@@ -250,12 +251,14 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 .tds.is-fs, .tds:fullscreen {
   position: fixed;
   inset: 0;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   z-index: 2147483000;
   background: var(--tds-view-bg);
 }
-.tds.is-fs .tds-main, .tds:fullscreen .tds-main { height: 100%; padding-right: 0; flex-direction: row; }
+.tds.is-fs .tds-main, .tds:fullscreen .tds-main { flex: 1 1 0; min-height: 0; padding-right: 0; flex-direction: row; }
 .tds.is-fs .tds-view, .tds:fullscreen .tds-view { aspect-ratio: auto; height: 100%; max-height: none; min-height: 0; }
 .tds.is-fs .tds-panel, .tds:fullscreen .tds-panel {
   position: absolute;
@@ -284,7 +287,7 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 .tds[data-controls="minimal"] .tds-main,
 .tds[data-controls="none"] .tds-main { padding-right: 0; flex-direction: column; }
 .tds[data-controls="none"] .tds-hud,
-.tds[data-controls="none"] .tds-hint,
+.tds[data-controls="none"] .tds-bar,
 .tds[data-controls="none"] .tds-caption { display: none; }
 .tds[data-controls="full"] .tds-hud-nav { display: none; }
 .tds-caption {
@@ -391,39 +394,28 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 .tds.is-fs .tds-btn-fs .i-min, .tds:fullscreen .tds-btn-fs .i-min { display: block; }
 .tds-btn-play .i-reset, .tds.is-played .tds-btn-play .i-play { display: none; }
 .tds.is-played .tds-btn-play .i-reset { display: block; }
+.tds-btn-playall .i-pause, .tds.is-playing-all .tds-btn-playall .i-play { display: none; }
+.tds.is-playing-all .tds-btn-playall .i-pause { display: block; }
+.tds.is-playing-all .tds-btn-playall { color: var(--tds-accent); border-color: var(--tds-accent); }
 
-/* ── Hint pill and credit ─────────────────────────────────────────── */
+/* ── Bar: the hint and the credit ─────────────────────────────────── */
 
-.tds-hint {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  max-width: calc(100% - 24px);
+.tds-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 16px;
   padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--tds-hint-bg);
-  color: var(--tds-hint-text);
   font-size: calc(12px * var(--font-scale, 1));
-  line-height: 1.3;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 5;
-  transition: opacity .35s ease, transform .35s ease;
+  line-height: 1.4;
+  color: var(--tds-desc);
+  background: var(--tds-tip-bg);
+  border-top: 1px solid var(--tds-divider);
 }
-.tds-hint-text { overflow: hidden; text-overflow: ellipsis; }
-.tds-credit {
-  font-family: var(--label-font, var(--ui-font, Roboto, system-ui, sans-serif));
-  font-weight: 600;
-  letter-spacing: .02em;
-  opacity: .85;
-}
-.tds-hint.hf { opacity: 0; }
-.tds-hint.hh .tds-hint-text { display: none; }
-.tds-hint.hh { padding: 3px 9px; opacity: .8; }
+.tds-hint { flex: 1 1 auto; min-width: 0; }
+.tds-credit { margin-left: auto; white-space: nowrap; }
+.tds-credit a { color: inherit; font-weight: 600; text-decoration: none; }
+.tds-credit a:hover { color: var(--tds-accent); text-decoration: underline; }
 
 /* ── Fallback box (no WebGL, load errors, still loading) ──────────── */
 
@@ -539,6 +531,7 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 .tds[data-placement="overlay"] .tds-nav, .tds.is-fs .tds-nav, .tds:fullscreen .tds-nav { padding-bottom: 10px; background: none; }
 .tds-nav button { flex: none; height: 34px; padding: 0 12px; }
 .tds-nav button svg { width: 16px; height: 16px; }
+.tds-nav .tds-btn-playall { width: 34px; padding: 0; }
 .tds-progress { flex: 1 1 auto; height: 4px; border-radius: 2px; background: var(--tds-divider); overflow: hidden; }
 .tds-progress-bar { height: 100%; width: 0; background: var(--tds-accent); transition: width .3s ease; }
 
@@ -551,6 +544,7 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
   .tds-hud { top: 6px; left: 6px; right: 6px; }
   .tds-hud button, .tds-nav button { min-width: 36px; height: 36px; }
   .tds-nav button { flex: 1 1 auto; }
+  .tds-nav .tds-btn-playall { flex: none; width: 48px; }
   .tds-nav .tds-progress { order: -1; flex: 1 0 100%; margin-bottom: 8px; }
   .tds-nav { flex-wrap: wrap; }
   .tds-label { max-width: 160px; }
@@ -558,7 +552,7 @@ html.tds-page[data-theme="dark"] body { background: var(--bg, #131313); color: v
 
 /* ── Editor mode ──────────────────────────────────────────────────── */
 
-.tds.is-editor .tds-hint, .tds.is-editor .tds-panel, .tds.is-editor .tds-caption { display: none; }
+.tds.is-editor .tds-bar, .tds.is-editor .tds-panel, .tds.is-editor .tds-caption { display: none; }
 .tds.is-editor .tds-main { padding-right: 0; }
 .tds.is-editor .tds-view { aspect-ratio: auto; height: 100%; min-height: 0; max-height: none; }
 .tds.is-editor, .tds.is-editor .tds-main { height: 100%; }
