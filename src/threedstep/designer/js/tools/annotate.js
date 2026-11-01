@@ -1,6 +1,7 @@
 // The annotation tools: Arrow (two clicks on surfaces: tail, then head; Shift
 // keeps the head on the tail's surface normal), Rotate arrow (one click: the
-// axis is the surface normal, the radius comes from the part's size), Label
+// axis is the surface normal into the part, so the arrow turns clockwise as
+// you look at the surface; the radius comes from the part's size), Label
 // (one click, then type in the inspector field that gets focus), and the pick
 // modes behind the inspector's "Pick" buttons and the fit list. Points are
 // stored in the picked part's assembled frame (attach), so they travel with
@@ -106,15 +107,22 @@ export class AnnotateTools {
     return {
       activate: () => this.vp.setPrompt(PROMPT_ROTATE),
       deactivate: () => this.vp.setPrompt(""),
-      onPick: (hit) => {
+      onPick: (hit, event) => {
         if (hit && hit.arrow != null) return false;
         if (!hit || !hit.id) return true;
         const st = this.state;
         const box = st.bboxOf([hit.id]);
         const radius = roundTo(Math.min(100, Math.max(0.5, (box ? boxDiagonal(box) : 16) / 4)), 1);
-        const n = vnorm(hit.normal);
+        // The axis points into the surface, away from the viewer (a back face
+        // of a double-sided part has its normal the other way): the viewer
+        // sweeps positive turns clockwise seen from `from` toward `to`, so the
+        // arrow turns clockwise as you look at the surface, as a screw goes in.
+        let n = vnorm(hit.normal);
+        const ed = this.vp.viewer && this.vp.viewer.editor;
+        const ray = ed && event ? ed.ray(event.clientX, event.clientY) : null;
+        if (ray && vdot(n, ray.direction) > 0) n = vscale(n, -1);
         const pl = attachPlacement(st, hit.id);
-        const [from, to] = convertAttached([hit.point, vadd(hit.point, vscale(n, radius))], null, pl).map((p) => p.map((v) => roundTo(v, 3)));
+        const [from, to] = convertAttached([hit.point, vsub(hit.point, vscale(n, radius))], null, pl).map((p) => p.map((v) => roundTo(v, 3)));
         st.addArrow({ from, to, kind: "rotate", radius, turns: 0.75, attach: hit.id }, "viewport");
         return true;
       },
