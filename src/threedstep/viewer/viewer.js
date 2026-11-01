@@ -960,7 +960,6 @@
     var raycaster = null;
     var dpr = 1;
     var modelsLoaded = false;
-    var pendingStep = null;
 
     function fail(err, detail) {
       var msg = err && err.message ? err.message : String(err);
@@ -2203,7 +2202,6 @@
       var i = stepIndex(ref);
       if (i < 0 || !states.length) return;
       if (i === current) return;
-      if (!modelsLoaded && webgl) { pendingStep = { ref: ref, opts: opts }; }
       var animate = opts.animate !== false && current >= 0 && !editor;
       var changed = i !== current;
       current = i;
@@ -2704,7 +2702,7 @@
       refold();
       renderPanelStatic();
       hideFallback();
-      var i = stepIndex(initialRef);
+      var i = current >= 0 ? current : stepIndex(initialRef);
       if (i < 0) i = 0;
       current = -1;
       if (states.length) goToStep(i, { animate: false });
