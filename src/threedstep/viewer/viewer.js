@@ -2452,12 +2452,17 @@
       var mqDark = win.matchMedia("(prefers-color-scheme: dark)");
       var onScheme = function () { applyTokens(); };
       if (mqDark.addEventListener) { mqDark.addEventListener("change", onScheme); unloads.push(function () { mqDark.removeEventListener("change", onScheme); }); }
+      // The listener armed last is the one dispose() removes, so the media
+      // query never holds on to a disposed viewer.
+      var dprMq = null, dprH = null;
       var armDpr = function () {
         var mq = win.matchMedia("(resolution: " + (win.devicePixelRatio || 1) + "dppx)");
-        var h = function () { mq.removeEventListener("change", h); if (!disposed) { armDpr(); onResize(); } };
+        var h = function () { mq.removeEventListener("change", h); dprMq = null; if (!disposed) { armDpr(); onResize(); } };
         mq.addEventListener("change", h);
+        dprMq = mq; dprH = h;
       };
       armDpr();
+      unloads.push(function () { if (dprMq) dprMq.removeEventListener("change", dprH); dprMq = null; });
     }
     if (win.MutationObserver) {
       var mo = new win.MutationObserver(function () { applyTokens(); });
@@ -2609,6 +2614,10 @@
         Object.keys(matCache).forEach(function (k) { matCache[k].dispose(); });
         if (unitShaft) { unitShaft.dispose(); unitCone.dispose(); }
         renderer.dispose();
+        // Release the context itself: the browser caps live WebGL contexts
+        // (16 in Chrome), and a viewer recreated on every theme or behavior
+        // change would otherwise leave one behind each time.
+        renderer.forceContextLoss();
       }
       while (container.firstChild) container.removeChild(container.firstChild);
       container.classList.remove("tds-ready", "is-active", "is-fs", "is-flying");
