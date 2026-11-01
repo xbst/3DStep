@@ -231,22 +231,17 @@ async function attachGlb(file, name) {
 
 // ── Saving and unsaved work ─────────────────────────────────────────
 
-// The TOML as last saved or opened. Comparing the editor's text with it is
-// what "unsaved" means for the project; the models track their own state.
-let savedText = null;
-let projectName = "";
-
-function markSaved(text) {
-  savedText = text;
-  updateTitle();
-}
-
+// state.file holds the TOML as last saved or opened. Comparing the editor's
+// text with it is what "unsaved" means for the project; the models track their
+// own state. It is part of the undo history, so undoing an Open brings back the
+// previous project's file name too.
 function hasUnsavedChanges(editorPanel) {
+  const { savedText } = state.file;
   return (savedText !== null && editorPanel.getValue() !== savedText) || state.dirtyModels.size > 0;
 }
 
 function defaultStem() {
-  if (projectName) return projectName;
+  if (state.file.name) return state.file.name;
   const title = state.project.assembly.title;
   if (title && title !== new Project().assembly.title) return slugify(title);
   const first = state.project.assembly.models[0];
@@ -343,8 +338,7 @@ async function saveProject(editorPanel) {
       saved.push(name);
     }
   }
-  projectName = tomlName.replace(/\.toml$/i, "");
-  markSaved(text);
+  state.markFileSaved(tomlName.replace(/\.toml$/i, ""), text);
   state.markModelsSaved(written);
   const models = state.project.assembly.models;
   showBanner("save",
@@ -417,9 +411,7 @@ async function openFiles(files, editorPanel, showTab) {
       problems.push(`${file.name}: ${e.message || e}`);
     }
   }
-  if (!state.loadProject(parsed.project, { models, bytes: bytesMap, origin: "open", sourceText: text })) return;
-  projectName = toml.name.replace(/\.toml$/i, "");
-  markSaved(text);
+  if (!state.loadProject(parsed.project, { models, bytes: bytesMap, origin: "open", sourceText: text, fileName: toml.name.replace(/\.toml$/i, "") })) return;
   hideBanner("open-error");
   hideBanner("save");
   if (problems.length) showBanner("open-error", esc(problems.join(" ")), { warn: true });
@@ -619,7 +611,6 @@ function init() {
   const start = new Project();
   const text = serializeProject(start);
   state.loadProject(start, { origin: "init", sourceText: text });
-  markSaved(text);
   setupUnloadGuard(editorPanel);
 
   for (const ev of ["project-changed", "models-changed"]) {

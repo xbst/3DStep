@@ -64,6 +64,11 @@ export class ProjectState {
     // The TOML tab keeps the last text it synchronized here, so undo restores
     // comments and formatting with the data (PinConnect's sourceText).
     this.sourceText = null;
+    // The file the project was opened from or last saved as: its name without
+    // .toml ("" before the first save) and the TOML text it holds. Snapshots
+    // keep this object, not a copy: undoing an Open brings back the previous
+    // project's file, and a save updates it for every undo step of the project.
+    this.file = { name: "", savedText: null };
     this.themes = [];               // [{name, display}] from the bridge
     this.runtimeBytes = DEFAULT_RUNTIME_BYTES;
     this._glbCache = new WeakMap();   // Model -> its GLB: the bytes it was opened or saved as, else as written
@@ -214,6 +219,7 @@ export class ProjectState {
     return {
       project: this.project.toData(),
       sourceText: this.sourceText,
+      file: this.file,
       selection: JSON.parse(JSON.stringify(this.selection)),
       currentStep: this.currentStep,
       models: withModels ? { map: new Map(this.models) } : null,
@@ -241,6 +247,7 @@ export class ProjectState {
     const listBefore = JSON.stringify(this.project.assembly.models);
     this.project = Project.fromData(snap.project);
     this.sourceText = snap.sourceText ?? null;
+    this.file = snap.file;
     // The loaded models change with a model snapshot, or with a models list
     // the TOML tab edited: the registry describes loadedModels() either way.
     const modelsChanged = !!snap.models || JSON.stringify(this.project.assembly.models) !== listBefore;
@@ -292,9 +299,10 @@ export class ProjectState {
   }
 
   // One undo step: the new project (and models), then the events.
-  _commit(origin, next, change, { models = null, currentStep, selection } = {}) {
+  _commit(origin, next, change, { models = null, currentStep, selection, file } = {}) {
     if (!models && JSON.stringify(next.toData()) === JSON.stringify(this.project.toData())) return false;
     this._pushUndo(!!models);
+    if (file) this.file = file;
     const stepBefore = this.currentStep;
     const selBefore = JSON.stringify(this.selection);
     const listBefore = JSON.stringify(this.project.assembly.models);
@@ -329,9 +337,11 @@ export class ProjectState {
   }
 
   // Replace everything: an opened project, or the empty start. "init" keeps
-  // no history; "open" is one undo step.
-  loadProject(project, { models = new Map(), bytes = new Map(), origin = "open", sourceText = null } = {}) {
+  // no history; "open" is one undo step. The project's file becomes fileName
+  // (without .toml), holding sourceText.
+  loadProject(project, { models = new Map(), bytes = new Map(), origin = "open", sourceText = null, fileName = "" } = {}) {
     if (!this._prepareMutation(origin)) return false;
+    const file = { name: fileName, savedText: sourceText };
     const state = { map: new Map(models) };
     // The opened files are what is on disk from now on.
     this._onDisk = new Map(state.map);
@@ -341,6 +351,7 @@ export class ProjectState {
       this.models = state.map;
       this.registry = buildRegistry(this.loadedModels());
       this.sourceText = sourceText;
+      this.file = file;
       this.currentStep = project.steps.length ? 0 : -1;
       this.selection = emptySelection();
       this._undoStack = [];
@@ -355,7 +366,14 @@ export class ProjectState {
       this._origin = null;
       return true;
     }
-    return this._commit(origin, project, { kind: "full", text: sourceText }, { models: state, currentStep: project.steps.length ? 0 : -1, selection: emptySelection() });
+    return this._commit(origin, project, { kind: "full", text: sourceText }, { models: state, currentStep: project.steps.length ? 0 : -1, selection: emptySelection(), file });
+  }
+
+  // The project was saved as name (without .toml), holding text.
+  markFileSaved(name, text) {
+    this.file.name = name;
+    this.file.savedText = text;
+    this.emit("dirty-changed", {});
   }
 
   // Add models opened beside a project (matched by file name), without an undo step of their own.
