@@ -18,9 +18,10 @@ wheels on 8.0, and the two meshers do not always split a face the same way.
 A project TOML works with either GLB, but the bytes are not the same.
 
 ``3dstep split assembly.step`` (:func:`split`) cuts an assembly too big for
-the designer's reader into several STEP files by top-level component, each
-one assembly holding its components where the source has them, so the
-designer imports the files as models of one project that line up.
+the designer's reader into several STEP files by top-level component, or by
+a component inside a sub-assembly named by its path, each file one assembly
+holding its components where the source has them, so the designer imports
+the files as models of one project that line up.
 """
 from __future__ import annotations
 
@@ -33,7 +34,7 @@ import tempfile
 import tomllib
 from array import array
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from OCP.Bnd import Bnd_Box
@@ -50,7 +51,7 @@ from OCP.STEPCAFControl import STEPCAFControl_Reader, STEPCAFControl_Writer
 from OCP.STEPControl import STEPControl_StepModelType
 from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString
 from OCP.TDataStd import TDataStd_Name
-from OCP.TDF import TDF_ChildIterator, TDF_Label
+from OCP.TDF import TDF_ChildIterator, TDF_Label, TDF_Tool
 from OCP.TDocStd import TDocStd_Document
 from OCP.TopAbs import TopAbs_FACE, TopAbs_REVERSED, TopAbs_SHELL, TopAbs_SOLID
 from OCP.TopExp import TopExp_Explorer
@@ -58,7 +59,7 @@ from OCP.TopLoc import TopLoc_Location
 from OCP.TopoDS import TopoDS, TopoDS_Shape
 from OCP.UnitsMethods import UnitsMethods_LengthUnit
 from OCP.XCAFDoc import (XCAFDoc_ColorTool, XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_Editor,
-                         XCAFDoc_ShapeTool)
+                         XCAFDoc_Location, XCAFDoc_ShapeTool)
 
 from . import __version__, config, glb
 
@@ -684,18 +685,23 @@ _SPLIT_FILE_KEYS = ("name", "assembly", "take")
 
 @dataclass
 class Component:
-    """A product among an assembly's top-level components, as ``3dstep split
-    --list`` prints it: its name, its instances, and the bodies they hold."""
+    """A product among an assembly's components, as ``3dstep split --list``
+    prints it: its name, its instances, the bodies they hold and, when the
+    listing goes deeper, the products among its own components, each counted
+    over every instance of this one."""
     name: str
     instances: int
     bodies: int
+    children: list = field(default_factory=list)
 
 
 @dataclass
 class SplitFile:
     """A ``[[file]]`` of a split spec: the STEP file to write, the name of the
-    assembly written into it, and the products it takes (``"*"``: every
-    product no other file names). ``spec`` and ``index`` place it in messages."""
+    assembly written into it, and what it takes: products among the top-level
+    components, components inside a sub-assembly by their path (``"Case/Lid"``),
+    or ``"*"`` for every component no other file takes. ``spec`` and ``index``
+    place it in messages."""
     name: str
     assembly: str
     take: list[str]
@@ -721,7 +727,8 @@ def load_split_spec(path: str | Path) -> list[SplitFile]:
     """Load a split spec: a TOML file of ``[[file]]`` tables, each with a
     ``name`` (the STEP file to write), an ``assembly`` (the name of the
     assembly written into it, which the designer's ids come from) and a
-    ``take`` list (product names, or ``"*"`` for the rest).
+    ``take`` list (product names, paths into sub-assemblies such as
+    ``"Case/Lid"``, or ``"*"`` for the rest).
 
     Checks what can be checked without the assembly and raises
     ``ValueError("<file>: [[file]] #N: <message>")``, as the project loader
@@ -809,6 +816,21 @@ def _component_name(label) -> str:
     return name
 
 
+def _components_of(label):
+    """The components of the assembly ``label`` is or refers to, as (name,
+    label) in document order; none for a part."""
+    target = TDF_Label()
+    if XCAFDoc_ShapeTool.IsReference_s(label):
+        XCAFDoc_ShapeTool.GetReferredShape_s(label, target)
+    else:
+        target = label
+    if not XCAFDoc_ShapeTool.IsAssembly_s(target):
+        return []
+    labels = Sequence_TDF_Label()
+    XCAFDoc_ShapeTool.GetComponents_s(target, labels, False)
+    return [(_component_name(labels.Value(i)), labels.Value(i)) for i in range(1, labels.Length() + 1)]
+
+
 def _read_components(path: Path):
     """Read a STEP assembly to split it: (the document, the root assembly's
     name, its top-level components as (name, label) in document order). A
@@ -830,21 +852,35 @@ def _read_components(path: Path):
     return document, _label_name(free[0]), [(_component_name(label), label) for label in components]
 
 
-def list_components(path: str | Path) -> tuple[str | None, list[Component]]:
-    """The products among a STEP assembly's top-level components, in document
-    order, with their instances and bodies: the names a split spec's
-    ``take`` lists. Returned with the root assembly's name, which is None for
-    a file of several top-level shapes (its shapes are the components); a
-    file of one part has no components. Raises ValueError for a file
-    OpenCascade cannot read."""
-    # The labels live in the document, which stays referenced until this returns.
-    document, root, components = _read_components(Path(path))
+def _products(components, depth: int) -> list[Component]:
+    """The products among ``components`` ((name, label) instances), in
+    document order, with their instances and bodies, and ``depth - 1`` levels
+    of the products among their own components."""
     products: dict[str, Component] = {}
+    instances: dict[str, list] = {}
     for name, label in components:
         product = products.setdefault(name, Component(name=name, instances=0, bodies=0))
         product.instances += 1
         product.bodies += sum(1 for _ in _body_shapes(XCAFDoc_ShapeTool.GetShape_s(label)))
-    return root, list(products.values())
+        instances.setdefault(name, []).append(label)
+    if depth > 1:
+        for name, product in products.items():
+            product.children = _products([c for label in instances[name] for c in _components_of(label)], depth - 1)
+    return list(products.values())
+
+
+def list_components(path: str | Path, depth: int = 1) -> tuple[str | None, list[Component]]:
+    """The products among a STEP assembly's top-level components, in document
+    order, with their instances and bodies: the names a split spec's
+    ``take`` lists. A ``depth`` above 1 lists the products among each
+    product's own components too, that many levels down (each counted over
+    every instance of its parent), as a path in ``take`` names them. Returned
+    with the root assembly's name, which is None for a file of several
+    top-level shapes (its shapes are the components); a file of one part has
+    no components. Raises ValueError for a file OpenCascade cannot read."""
+    # The labels live in the document, which stays referenced until this returns.
+    document, root, components = _read_components(Path(path))
+    return root, _products(components, depth)
 
 
 def _default_files(products: list[str]) -> list[SplitFile]:
@@ -861,59 +897,173 @@ def _default_files(products: list[str]) -> list[SplitFile]:
     return files
 
 
+def _resolve_take(text: str, components, where: str) -> tuple:
+    """The path of product names a ``take`` entry means: a product among the
+    top-level ``components`` ((name, label) pairs), or names separated by
+    ``/`` down into sub-assemblies. A product name may hold a ``/`` itself:
+    at each level the longest name the rest of the text starts with is tried
+    first. Raises ValueError, ``where`` in front, naming the first name that
+    is not a component there, with the nearest names."""
+    best = None   # the deepest failure: the names resolved, the text left, the products there
+
+    def go(rest, names, level):
+        nonlocal best
+        products = list(dict.fromkeys(name for name, _ in level))
+        matches = sorted((p for p in products if rest == p or rest.startswith(p + "/")), key=len, reverse=True)
+        if not matches:
+            if best is None or len(names) > len(best[0]):
+                best = (names, rest, products)
+            return None
+        for p in matches:
+            if rest == p:
+                return names + (p,)
+            below = [c for name, label in level if name == p for c in _components_of(label)]
+            found = go(rest[len(p) + 1:], names + (p,), below)
+            if found:
+                return found
+        return None
+
+    found = go(text, (), components)
+    if found:
+        return found
+    names, rest, products = best
+    if names and not rest:
+        raise ValueError(f"{where}: take: '{text}' ends with '/': name the component inside '{'/'.join(names)}' after it")
+    head = rest.split("/", 1)[0]
+    near = difflib.get_close_matches(head, products, n=3, cutoff=0.6)
+    deeper = f" --depth {len(names) + 1}" if names else ""
+    hint = f"nearest: {', '.join(near)}" if near else f"3dstep split --list{deeper} names them"
+    if not names:
+        what = f"'{text}'" if head == text else f"'{text}': '{head}'"
+        raise ValueError(f"{where}: take: {what} is not a top-level component ({hint})")
+    parent = "/".join(names)
+    if not products:
+        raise ValueError(f"{where}: take: '{text}': '{parent}' has no components: it is a part")
+    raise ValueError(f"{where}: take: '{text}': '{head}' is not a component of '{parent}' ({hint})")
+
+
 def _plan(files: list[SplitFile], components: list) -> tuple[list, list[str]]:
-    """Each file with the labels of the components it takes, in document
-    order, and the warnings (products no file takes). Raises ValueError for
-    a name ``take`` lists that is not a top-level component, one line each,
-    and for a ``"*"`` left with nothing to take."""
-    products = list(dict.fromkeys(name for name, _ in components))
-    known = set(products)
+    """Each file with the components it takes, in document order, as (label,
+    location) pairs: the location is None for a top-level component, which
+    sits where its own location puts it, and the world location for a
+    component inside a sub-assembly (the product of the locations along its
+    path). With the warnings (what no file takes). Raises ValueError for a
+    name ``take`` lists that is not a component, one line each, for a path
+    and a prefix of it both taken, and for a ``"*"`` left with nothing."""
+    resolved = []   # (the path of names, the file, the text as written)
     errors = []
     for f in files:
-        for name in f.take:
-            if name != "*" and name not in known:
-                near = difflib.get_close_matches(name, products, n=3, cutoff=0.6)
-                hint = f"nearest: {', '.join(near)}" if near else "3dstep split --list names them"
-                errors.append(f"{f.where}: take: '{name}' is not a top-level component ({hint})")
+        for text in f.take:
+            if text == "*":
+                continue
+            try:
+                resolved.append((_resolve_take(text, components, f.where), f, text))
+            except ValueError as e:
+                errors.append(str(e))
     if errors:
         raise ValueError("\n".join(errors))
+    # A path and a prefix of it would put the nested component in two files.
+    for i, (path, f, text) in enumerate(resolved):
+        for other, g, their in resolved[:i]:
+            if path[:len(other)] == other or other[:len(path)] == path:
+                who = "the same file" if g is f else f"[[file]] #{g.index}"
+                how = "is" if path == other else "is inside" if len(path) > len(other) else "holds"
+                raise ValueError(f"{f.where}: take: '{text}' {how} '{their}', also taken by {who}: take one or the other")
 
-    named = {name for f in files for name in f.take if name != "*"}
+    # Walk the assembly: a component a file takes is a unit, one that a path
+    # goes through is opened for its own components, any other is left for "*".
+    taken = {path: f for path, f, _ in resolved}
+    opened = {path[:n] for path in taken for n in range(1, len(path))}
+    units = []   # (the path, the labels along it, the file taking it or None)
+
+    def walk(path, labels):
+        below = _components_of(labels[-1]) if path in opened and path not in taken else []
+        if path in taken:
+            units.append((path, labels, taken[path]))
+        elif below:
+            for name, child in below:
+                walk(path + (name,), labels + [child])
+        else:
+            units.append((path, labels, None))
+
+    for name, label in components:
+        walk((name,), [label])
+
+    def placed(labels):
+        if len(labels) == 1:
+            return labels[0], None
+        location = XCAFDoc_ShapeTool.GetLocation_s(labels[0])
+        for label in labels[1:]:
+            location = location.Multiplied(XCAFDoc_ShapeTool.GetLocation_s(label))
+        return labels[-1], location
+
+    rest = next((f for f in files if "*" in f.take), None)
     plan = []
     for f in files:
-        rest = "*" in f.take
-        labels = [label for name, label in components if name in f.take or (rest and name not in named)]
-        if not labels:
+        own = [placed(labels) for _path, labels, taker in units if taker is f or (taker is None and f is rest)]
+        if not own:
             raise ValueError(f"{f.where}: take: '*' takes nothing: the other files take every component")
-        plan.append((f, labels))
+        plan.append((f, own))
     warnings = []
-    left = [name for name in products if name not in named]
-    if left and not any("*" in f.take for f in files):
+    left = list(dict.fromkeys("/".join(path) for path, _labels, taker in units if taker is None))
+    if left and rest is None:
         warnings.append(f"{files[0].spec}: no [[file]] takes {', '.join(repr(n) for n in left)}, so the "
                         "split leaves " + ("it" if len(left) == 1 else "them") + " out (add \"*\" to a "
                         "file's take to keep every component no other file takes)")
     return plan, warnings
 
 
-def _write_assembly(labels, assembly: str) -> bytes:
-    """A STEP file holding the components ``labels`` as the components of one
-    new assembly named ``assembly``, each at its place in the source (its
-    location under the source's root), with its names, colors and layers."""
+def _write_assembly(components, assembly: str) -> bytes:
+    """A STEP file holding ``components``, (label, location) pairs, as the
+    components of one new assembly named ``assembly``, each at its place in
+    the source, with its names, colors and layers: a top-level component
+    (location None) where its own location puts it, a component inside a
+    sub-assembly at the world location given."""
     document = TDocStd_Document(TCollection_ExtendedString("XmlXCAF"))
     XCAFDoc_DocumentTool.SetLengthUnit_s(document, 1.0, UnitsMethods_LengthUnit.UnitsMethods_LengthUnit_Millimeter)
     shape_tool = XCAFDoc_DocumentTool.ShapeTool_s(document.Main())
     root = shape_tool.NewShape()
     # isMultiByte: the name arrives as UTF-8.
     TDataStd_Name.Set_s(root, TCollection_ExtendedString(assembly, True))
-    sequence = Sequence_TDF_Label()
-    for label in labels:
-        sequence.Append(label)
     # One assembly for them all, not a file per part: the designer meshes each
     # top-level shape with a deflection relative to its size, so the parts
     # are meshed as in the source, where a small part alone would be meshed
-    # far finer.
-    if not XCAFDoc_Editor.Extract_s(sequence, root, False):
-        raise ValueError(f"the components of '{assembly}' could not be copied")
+    # far finer. One Extract for as many as possible: within a call, the
+    # instances of one product share its copy.
+    def extract(batch):
+        sequence = Sequence_TDF_Label()
+        swapped = []
+        for label, location in batch:
+            sequence.Append(label)
+            # Extract copies a component at its own location, the one under
+            # its parent, and builds the assembly's compound, which the writer
+            # transfers, from it then: a location set on the copy afterwards
+            # does not reach the file. So a nested component carries its world
+            # location in the source while it is copied, then its own again.
+            if location is not None:
+                swapped.append((label, XCAFDoc_ShapeTool.GetLocation_s(label)))
+                XCAFDoc_Location.Set_s(label, location)
+        try:
+            copied = XCAFDoc_Editor.Extract_s(sequence, root, False)
+        finally:
+            for label, own in swapped:
+                XCAFDoc_Location.Set_s(label, own)
+        if not copied:
+            raise ValueError(f"the components of '{assembly}' could not be copied")
+
+    # A nested component under several instances of its sub-assembly is one
+    # label at several world locations: each goes in a call of its own.
+    batch, entries = [], set()
+    for label, location in components:
+        entry = TCollection_AsciiString()
+        TDF_Tool.Entry_s(label, entry)
+        if location is not None and entry.ToCString() in entries:
+            extract(batch)
+            batch, entries = [], set()
+        batch.append((label, location))
+        entries.add(entry.ToCString())
+    if batch:
+        extract(batch)
     shape_tool.UpdateAssemblies()
 
     saved = Interface_Static.IVal_s("write.surfacecurve.mode")
@@ -938,22 +1088,25 @@ def _write_assembly(labels, assembly: str) -> bytes:
 
 def split(path_in: str | Path, out_dir: str | Path, spec: list[SplitFile] | None = None
           ) -> tuple[list[SplitResult], list[str]]:
-    """Split a STEP assembly into several STEP files by top-level component.
+    """Split a STEP assembly into several STEP files by component.
 
     Each ``[[file]]`` of ``spec`` (from :func:`load_split_spec`) gets every
     instance of the products it takes, in document order, as the components
     of one new assembly named by its ``assembly``, each where the source has
-    it and with its names and colors; without a spec, each product gets a
-    file of its own. The designer then imports the files as models of one
-    project that line up, with ids that do not collide. The edges are
-    written without their 2D curves, so a file is about its share of the
-    source's size.
+    it and with its names and colors; without a spec, each top-level product
+    gets a file of its own. A path such as ``"Case/Lid"`` takes the
+    components named ``Lid`` of every ``Case``, at their world location; the
+    rest of ``Case`` is left for ``"*"`` (or out, with a warning), and a path
+    and a prefix of it cannot both be taken. The designer then imports the
+    files as models of one project that line up, with ids that do not
+    collide. The edges are written without their 2D curves, so a file is
+    about its share of the source's size.
 
-    Returns the files written, in the spec's order, and warnings (products
-    no file takes). Raises ValueError for a file that cannot be read or has
-    no components, for names ``take`` lists that are not components, and
-    for an output that would overwrite ``path_in``; OSError for a file or
-    folder that cannot be written.
+    Returns the files written, in the spec's order, and warnings (what no
+    file takes). Raises ValueError for a file that cannot be read or has no
+    components, for names ``take`` lists that are not components, and for
+    an output that would overwrite ``path_in``; OSError for a file or folder
+    that cannot be written.
     """
     path_in, out_dir = Path(path_in), Path(out_dir)
     # The labels live in the document, which stays referenced until this returns.
@@ -962,7 +1115,7 @@ def split(path_in: str | Path, out_dir: str | Path, spec: list[SplitFile] | None
         raise ValueError(f"{path_in.name} has no components to split: it holds one part")
     files = spec if spec is not None else _default_files(list(dict.fromkeys(n for n, _ in components)))
     plan, warnings = _plan(files, components)
-    for f, _labels in plan:
+    for f, _taken in plan:
         try:
             # samefile, as write() does: a case variant or a short name is the same file.
             same = os.path.samefile(path_in, out_dir / f.name)
@@ -978,9 +1131,9 @@ def split(path_in: str | Path, out_dir: str | Path, spec: list[SplitFile] | None
 
     results = []
     with _quiet_messages():
-        for f, labels in plan:
+        for f, taken in plan:
             try:
-                data = _write_assembly(labels, f.assembly)
+                data = _write_assembly(taken, f.assembly)
             except Exception as e:
                 if type(e).__module__.split(".")[0] != "OCP":
                     raise
@@ -990,5 +1143,5 @@ def split(path_in: str | Path, out_dir: str | Path, spec: list[SplitFile] | None
                 out.write_bytes(data)
             except OSError as e:
                 raise OSError(f"cannot write output file: {out}: {e.strerror or e}") from None
-            results.append(SplitResult(path=out, assembly=f.assembly, components=len(labels), size=len(data)))
+            results.append(SplitResult(path=out, assembly=f.assembly, components=len(taken), size=len(data)))
     return results, warnings
