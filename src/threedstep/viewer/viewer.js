@@ -1651,6 +1651,7 @@
 
     // ── State application ────────────────────────────────────────────
     var stateTween = null;
+    var playTween = null;
     function targetFor(part, st) {
       var p = st.placed[part.id];
       var visible = !!st.visible[part.id];
@@ -1680,6 +1681,10 @@
       var st = states[i];
       if (!st || !modelsLoaded) { if (done) done(); return; }
       if (stateTween) { removeTween(stateTween); stateTween = null; }
+      // a Play / Reset still running would finish after this transition and
+      // copy its own target over the new pose; the transition starts from
+      // the pose it reached instead
+      if (playTween) { removeTween(playTween); playTween = null; }
       var ms = animate && !reducedMotion() ? behavior.transitionMs : 0;
       var cam = resolveCamera(i);
       var moving = [];
@@ -1728,7 +1733,6 @@
 
     // Play / Reset (SPEC 6): the parts moved in this step tween between their
     // offsets and the assembled pose.
-    var playTween = null;
     function playMoves(toAssembled, animate) {
       var st = states[current];
       if (!st) return;
