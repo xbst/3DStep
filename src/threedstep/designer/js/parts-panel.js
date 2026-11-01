@@ -64,9 +64,15 @@ export class PartsPanel {
 
   _bind() {
     const st = this.state;
-    for (const ev of ["project-changed", "models-changed", "step-changed", "models-measured", "dirty-changed"]) st.on(ev, () => this.render());
-    // A notice reports what the last action did; history moves make it stale.
-    st.on("undo-changed", () => { if (st.origin === "undo") this.notice = ""; });
+    // A notice reports what the last action did; history moves, an opened
+    // project and an edit in the TOML tab make it stale.
+    const stale = new Set(["undo", "open", "init", "editor"]);
+    for (const ev of ["project-changed", "models-changed", "step-changed", "models-measured", "dirty-changed"]) {
+      st.on(ev, (data) => {
+        if ((ev === "project-changed" || ev === "models-changed") && stale.has(data?.origin)) this.notice = "";
+        this.render();
+      });
+    }
     st.on("selection-changed", () => this._paintSelection());
     this.search.addEventListener("input", () => {
       this.filter = this.search.value.trim().toLowerCase();
@@ -359,8 +365,11 @@ export class PartsPanel {
           after += out.after;
           if (out.after < out.before) changes[model.name] = out.model;
         }
-        this.notice = Object.keys(changes).length ? `Simplified ${formatCount(before)} → ${formatCount(after)} triangles` : "Nothing to simplify within that error bound";
-        if (Object.keys(changes).length) st.replaceModels(changes);
+        // Set the notice after the commit: committing first applies any
+        // pending typing in the TOML tab, which clears the notice.
+        const changed = Object.keys(changes).length > 0;
+        const ok = !changed || st.replaceModels(changes);
+        this.notice = !ok ? "" : changed ? `Simplified ${formatCount(before)} → ${formatCount(after)} triangles` : "Nothing to simplify within that error bound";
       } catch (e) {
         this.notice = `Could not simplify: ${e.message || e}`;
       }
