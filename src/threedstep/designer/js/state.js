@@ -200,7 +200,7 @@ export class ProjectState {
   // ── Mutations ──────────────────────────────────────────────────────
 
   _prepareMutation(origin) {
-    if (origin === "editor" || origin === "init" || this._isRestoring) return true;
+    if (origin === "editor" || origin === "init" || origin === "open" || this._isRestoring) return true;
     // The TOML tab may hold a pending keystroke: flush it before reading the
     // project. Text that does not parse cancels the action instead of letting
     // the two drift apart (PinConnect's before-mutation).
