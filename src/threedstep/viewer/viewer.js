@@ -1305,11 +1305,14 @@
       var loader = new THREE.GLTFLoader();
       return Promise.all(names.map(function (name) {
         return new Promise(function (resolve, reject) {
-          var buffer;
-          try { buffer = toArrayBuffer(models[name]); } catch (e) { reject(e); return; }
-          loader.parse(buffer, "", function (gltf) { resolve({ name: name, gltf: gltf }); }, function (err) {
+          function failed(err) {
             reject(new Error("could not load the model '" + name + "': " + (err && err.message ? err.message : err)));
-          });
+          }
+          // GLTFLoader.parse throws on a bad header or JSON chunk instead of
+          // calling onError, so both paths name the model.
+          try {
+            loader.parse(toArrayBuffer(models[name]), "", function (gltf) { resolve({ name: name, gltf: gltf }); }, failed);
+          } catch (e) { failed(e); }
         });
       }));
     }
@@ -2561,6 +2564,7 @@
         if (disposed) return;
         clearArrows();
         buildParts(loaded);
+        hideFallback();
         refold();
         renderPanelStatic();
         var i = clamp(current < 0 ? 0 : current, 0, Math.max(0, states.length - 1));
@@ -2568,7 +2572,12 @@
         if (states.length) goToStep(i, { animate: false });
         else showNoSteps();
         setCameraNow(camBefore);
-      }).catch(fail);
+      }).catch(function (e) {
+        // A model that does not load leaves the previous parts in place: keep
+        // them steerable, so a later goToStep still updates the view.
+        modelsLoaded = partList.length > 0;
+        fail(e);
+      });
     }
     function refold() {
       try {
