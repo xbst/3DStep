@@ -269,6 +269,12 @@
     return reg;
   }
 
+  // Play moves only the parts a step shows (playMoves), so a step whose moved
+  // parts are all hidden has nothing to play.
+  function hasVisibleMoves(st) {
+    return !!st && Object.keys(st.placed).some(function (id) { return st.visible[id]; });
+  }
+
   function foldSteps(scene, tree) {
     var reg = tree && tree.members ? tree : normalizeTree(tree);
     var warnings = [];
@@ -1048,8 +1054,7 @@
       btnNext.disabled = btnHudNext.disabled = i >= total - 1;
       progressBar.style.width = ((i + 1) / total * 100) + "%";
       progress.setAttribute("aria-valuenow", String(i + 1));
-      var hasMoves = Object.keys(st.placed).length > 0;
-      btnPlay.disabled = !hasMoves;
+      btnPlay.disabled = !hasVisibleMoves(st);
       btnPlay.setAttribute("aria-label", played ? STR.reset : STR.play);
       btnPlay.title = played ? STR.reset : STR.play;
     }
@@ -2202,7 +2207,7 @@
       if (modelsLoaded || !webgl) {
         try {
           applyState(i, animate, function () {
-            if (behavior.autoplay && !editor && changed && states[i] && Object.keys(states[i].placed).length) playMoves(true, true);
+            if (behavior.autoplay && !editor && changed && hasVisibleMoves(states[i])) playMoves(true, true);
           });
         } catch (e) {
           fail(e);
@@ -2703,7 +2708,7 @@
       handle.ready = true;
       container.classList.add("tds-ready");
       win.clearTimeout(watchdog);
-      if (behavior.autoplay && !editor && states[current] && Object.keys(states[current].placed).length) playMoves(true, true);
+      if (behavior.autoplay && !editor && hasVisibleMoves(states[current])) playMoves(true, true);
       if (handle.onReady) { try { handle.onReady(handle); } catch (err) { /* ignore */ } }
       relayout();
     }).catch(function (e) {
