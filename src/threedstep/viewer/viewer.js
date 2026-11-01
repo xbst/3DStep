@@ -304,10 +304,15 @@
     for (var i = 0; i < steps.length; i++) {
       var step = steps[i] || {};
       var where = "step " + (i + 1) + (step.id ? " (" + step.id + ")" : "");
+      // One id written in both lists is an error, as config.py has it; a part
+      // reached through a group in one list and named in the other is hidden,
+      // then shown (SPEC 6: hide, then show).
+      var rawShow = Array.isArray(step.show) ? step.show : [];
+      var rawHide = Array.isArray(step.hide) ? step.hide : [];
+      var both = rawShow.filter(function (id) { return rawHide.indexOf(id) >= 0; });
+      if (both.length) throw new Error(where + ": '" + both[0] + "' is in both show and hide");
       var hide = expand(step.hide, where + " hide");
       var show = expand(step.show, where + " show");
-      var both = show.filter(function (id) { return hide.indexOf(id) >= 0; });
-      if (both.length) throw new Error(where + ": '" + both[0] + "' is in both show and hide");
       hide.forEach(function (id) { visible[id] = false; });
       show.forEach(function (id) { visible[id] = true; });
 
