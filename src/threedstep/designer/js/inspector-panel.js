@@ -269,7 +269,9 @@ export class InspectorPanel {
     setTri("insp-gh", tri(new Set(expandIds(st.registry, step.ghost))));
     const placements = st.placements();
     const first = placements.get(parts[0]);
-    const same = parts.every((p) => JSON.stringify(placements.get(p) || null) === JSON.stringify(first || null));
+    // Only what the inspector shows: `named` differs for every part a move lists.
+    const key = (pl) => (pl ? JSON.stringify([pl.offset, pl.rotate, pl.arrow]) : null);
+    const same = parts.every((p) => key(placements.get(p)) === key(first));
     this._setVec("insp-offset", first ? first.offset : [0, 0, 0], !same);
     this._setVec("insp-rotate", first ? first.rotate : [0, 0, 0], !same);
     const arrowEl = this.container.querySelector("#insp-arrow");
