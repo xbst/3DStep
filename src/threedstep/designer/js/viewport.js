@@ -126,7 +126,7 @@ export class Viewport {
   addButton({ id, label = "", title = "", icon = "", onClick, group = "view", showLabel = true }) {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "vp-btn";
+    b.className = icon ? "vp-btn" : "vp-btn vp-text-only";
     if (id) b.dataset.id = id;
     b.title = title || label;
     b.setAttribute("aria-label", title || label);

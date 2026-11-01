@@ -1118,7 +1118,7 @@ html, body {
   .panel-inspector-body { overflow: visible; }
   .statusbar { flex-wrap: wrap; white-space: normal; }
   .vp-btn { padding: 0 6px; }
-  .vp-btn .vp-label { display: none; }
+  .vp-btn:not(.vp-text-only) .vp-label { display: none; }
   .insp-row > label:not(.check), .insp-row > .insp-label { width: 54px; }
   .form-grid { grid-template-columns: 1fr; }
   .form-grid .hint { grid-column: 1; }
