@@ -22,8 +22,8 @@ import {
 } from "./project-model.js";
 import { isValidId } from "./import/ids.js";
 import {
-  DEFAULT_RUNTIME_BYTES, bboxOf, deleteNodes, deletedIds, estimateGlbSize, glbNameFor, joinIds, mergeGroup as mergeModelGroup,
-  nodeIndex, triangleCount,
+  DEFAULT_RUNTIME_BYTES, bboxOf, convertUp, deleteNodes, deletedIds, estimateGlbSize, glbNameFor, joinIds,
+  mergeGroup as mergeModelGroup, nodeIndex, triangleCount,
 } from "./import/model.js";
 import { writeGlb } from "./import/glb-writer.js";
 
@@ -802,18 +802,22 @@ export class ProjectState {
 
   // A newly imported model (or an opened GLB, with its bytes): added to the
   // project under a file name no other model has. The first model names an
-  // untitled project and gets it a first step. A model whose ids the loaded
-  // models already use gets its prefix on every id (joinIds, which the import
-  // dialogs show first), and its old bytes no longer describe it.
+  // untitled project, sets its up axis and gets it a first step. A later
+  // model is rotated to the project's up axis (convertUp), and one whose ids
+  // the loaded models already use gets its prefix on every id (joinIds): the
+  // import dialogs do both and say so first. Either way its old bytes no
+  // longer describe it.
   addModel(model, { bytes = null, title = "", up = "", origin = "import" } = {}) {
     if (!this._prepareMutation(origin)) return null;
     const next = this.project.clone();
     const taken = [...next.assembly.models, ...this.models.keys()];
     const name = taken.includes(model.name) ? glbNameFor(model.name, taken) : model.name;
-    const joined = joinIds(name === model.name ? model : { ...model, name }, this.registry.model);
-    const named = joined.model;
-    if (joined.prefix) bytes = null;
     const first = !this.loadedModels().length;
+    const renamed = name === model.name ? model : { ...model, name };
+    const turned = first ? renamed : convertUp(renamed, next.assembly.up);
+    const joined = joinIds(turned, this.registry.model);
+    const named = joined.model;
+    if (turned !== renamed || joined.prefix) bytes = null;
     next.assembly.models.push(name);
     if (title && next.assembly.title === new Project().assembly.title && first) next.assembly.title = title;
     // The first model's up axis is the project's.

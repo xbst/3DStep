@@ -2,7 +2,9 @@
 //
 // A 3DStep GLB (asset.extras.threedstep present) round-trips: node names are
 // the ids, extras.label and extras.src come back, positions are dequantized
-// to Float32Array in model space, units and up come from the metadata.
+// to Float32Array in model space, units and up come from the metadata. An
+// import into a project with the other up axis turns it with model.js's
+// convertUp, the same rotation; opening a project's GLB never does.
 //
 // A foreign GLB (Blender, Fusion, ...) is converted (SPEC 13.3): node
 // transforms are baked into the positions, units are scaled to millimeters
@@ -14,6 +16,7 @@
 import { assignIds, isValidId } from "./ids.js";
 import {
   DEFAULT_COLOR, GENERATOR, clampColor, flattenForeign, identityMatrix, mergePrimitives, multiplyMatrices, nodeMatrix,
+  upMatrix,
 } from "./model.js";
 
 const MAGIC = 0x46546c67; // "glTF"
@@ -301,15 +304,6 @@ function decodeMesh(json, buffers, m, warnings) {
 }
 
 // ── Models ─────────────────────────────────────────────────────────────
-
-// Rotation from one up axis to another, as a column-major 4x4 matrix.
-function upMatrix(from, to) {
-  if (from === to) return identityMatrix();
-  // Y-up to Z-up: (x, y, z) -> (x, -z, y); Z-up to Y-up: (x, y, z) -> (x, z, -y).
-  return from === "y"
-    ? [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1]
-    : [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
-}
 
 function scaleMatrix(s) {
   return [s, 0, 0, 0, 0, s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1];

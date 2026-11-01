@@ -5,7 +5,7 @@
 import * as runtime from "./runtime.js";
 import { CDN_BASE, QUALITY, StepImportError, VENDOR_BASE, modelFromRaw, rawTree, readStepRaw } from "./import/step-import.js";
 import { GlbError, isGlb, parseGlb, readGlb, threedstepMetadata } from "./import/glb-reader.js";
-import { estimateGlbSize, glbNameFor, joinIds, triangleCount } from "./import/model.js";
+import { convertUp, estimateGlbSize, glbNameFor, joinIds, triangleCount } from "./import/model.js";
 import { simplifyModel } from "./import/simplify.js";
 
 export const REPO_URL = "https://github.com/xbst/3DStep";
@@ -282,21 +282,36 @@ function prefixNote({ prefix, shared }) {
   return `Ids prefixed with ${code(prefix)}: ${what} ${ids.length === 1 ? "is" : "are"} already used by ${andList(models.map(code))}.`;
 }
 
-// Import one file. Resolves to {model, bytes, title} or null when cancelled.
-// options: {taken: file names in use, up: the project's up axis, fresh: the
-// project has no models yet (its first model sets its up axis), last: the
-// previous import's choices to start from, inUse: id -> the file name of the
-// loaded model using it (a model sharing any gets prefixed ids)}.
+// The Up axis hint of an import dialog: the first model sets the project's
+// axis; a later one names its own, and the project's is fixed.
+function upHint(fresh, projectUp) {
+  return fresh
+    ? "The project takes its up axis from its first model."
+    : `The file's up axis. The project is <strong>${esc(projectUp.toUpperCase())}-up</strong>: a model with the other axis up is rotated to it.`;
+}
+
+// "rotated from Z-up to the project's Y-up"
+function rotation(fileUp, projectUp) {
+  return `rotated from ${fileUp.toUpperCase()}-up to the project's ${projectUp.toUpperCase()}-up`;
+}
+
+// Import one file. Resolves to {model, bytes, title, up} or null when
+// cancelled. options: {taken: file names in use, up: the project's up axis,
+// fresh: the project has no models yet (its first model sets its up axis;
+// a later one is rotated to it), last: the previous import's choices to start
+// from, inUse: id -> the file name of the loaded model using it (a model
+// sharing any gets prefixed ids)}.
 export function openImport(file, { taken = [], up = "z", fresh = false, last = {}, inUse = new Map() } = {}) {
   const lower = file.name.toLowerCase();
   const isStep = lower.endsWith(".step") || lower.endsWith(".stp");
+  const projectUp = up === "y" ? "y" : "z";
   // A first STEP model is Y-up unless chosen otherwise: Fusion, where most
-  // of them come from, is.
-  if (isStep) return importStepDialog(file, { taken, up: fresh ? (last.up || "y") : up, last, inUse });
-  return importGlbDialog(file, { taken, up, last, inUse });
+  // of them come from, is. A later one starts from the project's axis.
+  if (isStep) return importStepDialog(file, { taken, up: fresh ? (last.up || "y") : projectUp, projectUp, fresh, last, inUse });
+  return importGlbDialog(file, { taken, projectUp, fresh, last, inUse });
 }
 
-function importStepDialog(file, { taken, up, last, inUse }) {
+function importStepDialog(file, { taken, up, projectUp, fresh, last, inUse }) {
   return new Promise((resolve) => {
     let result = null;
     let abort = null;
@@ -337,6 +352,7 @@ function importStepDialog(file, { taken, up, last, inUse }) {
         `<label for="imp-simplify">Simplify</label><span class="inline">to <input id="imp-simplify" class="field-input" type="number" min="5" max="100" step="5" value="${opts.simplify}"> % of the triangles</span>` +
         `<label for="imp-up">Up axis</label><select id="imp-up" class="field-select">` +
         `<option value="y"${opts.up === "y" ? " selected" : ""}>Y (Fusion, glTF)</option><option value="z"${opts.up === "z" ? " selected" : ""}>Z (most other CAD tools)</option></select>` +
+        `<span class="hint" id="imp-up-hint">${upHint(fresh, projectUp)}</span>` +
         `</div>` +
         (error ? `<div class="dialog-error">${esc(error)}</div>` : "") +
         `<div class="modal-foot"><span class="spacer"></span>` +
@@ -423,6 +439,7 @@ function importStepDialog(file, { taken, up, last, inUse }) {
         `<label for="rev-simplify">Simplify</label><span class="inline">to <input id="rev-simplify" class="field-input" type="number" min="5" max="100" step="5" value="${opts.simplify}"> % of the triangles</span>` +
         `</div>` +
         `<p class="review-summary" id="rev-summary"></p>` +
+        (!fresh && opts.up !== projectUp ? `<p class="insp-note" id="rev-up">The model is ${rotation(opts.up, projectUp)}.</p>` : "") +
         `<p class="insp-note" id="rev-ids" hidden></p>` +
         (tree.length
           ? `<p class="insp-note">These nodes have several bodies. A merged node is one part; split it to move or highlight its bodies one by one (a part cannot be split after import, but parts can always be merged).</p>` +
@@ -493,8 +510,10 @@ function importStepDialog(file, { taken, up, last, inUse }) {
             return;
           }
         }
+        // A later model joins in the project's axes; the first sets them.
+        if (!fresh) out = convertUp(out, projectUp);
         Object.assign(last, opts);
-        result = { model: out, bytes: null, title, up: opts.up };
+        result = { model: out, bytes: null, title, up: out.up };
         close();
       });
       rebuild();
@@ -505,7 +524,7 @@ function importStepDialog(file, { taken, up, last, inUse }) {
   });
 }
 
-function importGlbDialog(file, { taken, up, last, inUse }) {
+function importGlbDialog(file, { taken, projectUp, fresh, last, inUse }) {
   return new Promise((resolve) => {
     let result = null;
     const { body, close, onClose } = openModal("Import a GLB model", { size: "medium" });
@@ -531,16 +550,28 @@ function importGlbDialog(file, { taken, up, last, inUse }) {
       // on Add.
       let read = null;
       try {
-        read = readGlb(bytes, { name, units, up: fileUp, targetUp: up || "z" });
+        read = readGlb(bytes, { name, units, up: fileUp, targetUp: projectUp });
       } catch (e) {
         read = null;
       }
       const joined = read ? joinIds(read, inUse) : { prefix: "", shared: [] };
+      // A 3DStep model added after the first is rotated to the project's up
+      // axis. Its metadata says which axis is up in it, and the select can
+      // correct that: `3dstep model.step` marks every file Z-up.
+      const metaUp = meta && meta.up === "y" ? "y" : "z";
+      const askUp = meta && !fresh;
       body.innerHTML = `<div class="file-head"><span class="file-name">${esc(file.name)}</span>` +
         `<span class="file-size">${formatBytes(file.size)}</span><span class="file-size">→ ${esc(name)}</span></div>` +
         (meta
-          ? `<p>A 3DStep model (${esc(meta.units || "mm")}, ${esc((meta.up || "z").toUpperCase())}-up)${joined.prefix ? "." : ": it is used as it is."}</p>`
-          : `<p class="insp-note">A GLB from another tool: say which unit and up axis it uses, and it is converted to millimeters and the project's ${esc(up.toUpperCase())}-up axes.</p>` +
+          ? `<p id="glb-what"></p>` +
+            (askUp
+              ? `<div class="form-grid">` +
+                `<label for="glb-up">Up axis</label><select id="glb-up" class="field-select">` +
+                `<option value="y"${metaUp === "y" ? " selected" : ""}>Y</option><option value="z"${metaUp === "z" ? " selected" : ""}>Z</option></select>` +
+                `<span class="hint">${upHint(false, projectUp)} The file says ${metaUp.toUpperCase()}.</span>` +
+                `</div>`
+              : "")
+          : `<p class="insp-note">A GLB from another tool: say which unit and up axis it uses, and it is converted to millimeters and the project's ${esc(projectUp.toUpperCase())}-up axes.</p>` +
             `<div class="form-grid">` +
             `<label for="glb-units">Unit</label><select id="glb-units" class="field-select">` +
             ["mm", "m", "in"].map((u) => `<option value="${u}"${u === units ? " selected" : ""}>${{ mm: "Millimeters", m: "Meters (glTF's unit)", in: "Inches" }[u]}</option>`).join("") +
@@ -554,20 +585,37 @@ function importGlbDialog(file, { taken, up, last, inUse }) {
         `<button class="toolbar-btn" data-act="cancel">Cancel</button>` +
         `<button class="toolbar-btn primary" data-act="add">Add to project</button></div>`;
       body.querySelector('[data-act="cancel"]').addEventListener("click", close);
+      const upSel = body.querySelector("#glb-up");
+      // What happens to a 3DStep model, with the up axis chosen now.
+      const describe = () => {
+        const what = body.querySelector("#glb-what");
+        if (!what) return;
+        const up = askUp ? upSel.value : metaUp;
+        what.textContent = `A 3DStep model (${meta.units || "mm"}, ${metaUp.toUpperCase()}-up)` +
+          (askUp && up !== projectUp ? `: it is ${rotation(up, projectUp)}.` : joined.prefix || up !== metaUp ? "." : ": it is used as it is.");
+      };
+      if (askUp) upSel.addEventListener("change", describe);
+      describe();
       const addBtn = body.querySelector('[data-act="add"]');
       addBtn.focus();
       addBtn.addEventListener("click", () => {
         const errEl = body.querySelector("#glb-error");
         try {
           const unitsSel = body.querySelector("#glb-units");
-          const upSel = body.querySelector("#glb-up");
-          if (unitsSel) last.units = unitsSel.value;
-          if (upSel) last.fileUp = upSel.value;
-          const { model, prefix } = joinIds(meta && read ? read : readGlb(bytes, {
-            name, units: unitsSel ? unitsSel.value : "mm", up: upSel ? upSel.value : "z", targetUp: up || "z",
-          }), inUse);
-          // A 3DStep GLB keeps its bytes, unless its ids changed: that is the file Save writes.
-          result = { model, bytes: meta && !prefix ? bytes : null, title, up: meta ? (meta.up || "z") : (up || "z") };
+          let model;
+          if (meta) {
+            model = read || readGlb(bytes, { name });
+            // The axis the author says the file has, then the project's.
+            if (askUp) model = convertUp(upSel.value === model.up ? model : { ...model, up: upSel.value }, projectUp);
+          } else {
+            last.units = unitsSel.value;
+            last.fileUp = upSel.value;
+            model = readGlb(bytes, { name, units: unitsSel.value, up: upSel.value, targetUp: projectUp });
+          }
+          model = joinIds(model, inUse).model;
+          // A 3DStep GLB keeps its bytes while nothing changed (ids, axes):
+          // that is the file Save writes.
+          result = { model, bytes: meta && model === read ? bytes : null, title, up: model.up };
           close();
         } catch (e) {
           errEl.hidden = false;

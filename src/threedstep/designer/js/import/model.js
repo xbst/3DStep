@@ -530,3 +530,31 @@ export function transformPrimitive(prim, m) {
   }
   return { positions, normals, indices, color: prim.color };
 }
+
+// ── Axes ───────────────────────────────────────────────────────────────
+
+// Rotation from one up axis to another, as a column-major 4x4 matrix: a
+// quarter turn about X.
+export function upMatrix(from, to) {
+  if (from === to) return identityMatrix();
+  // Y-up to Z-up: (x, y, z) -> (x, -z, y); Z-up to Y-up: (x, y, z) -> (x, z, -y).
+  return from === "y"
+    ? [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1]
+    : [1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1];
+}
+
+// The model turned from its up axis to `up` ("y" or "z"), as a model added to
+// a project with the other axis is (SPEC 13.3): every part's positions and
+// normals go through upMatrix, as a foreign file's do in glb-reader.js, and
+// the model says `up`. The model itself when it has that axis already.
+export function convertUp(model, up) {
+  const from = model.up === "y" ? "y" : "z";
+  if ((up !== "y" && up !== "z") || from === up) return model;
+  const m = upMatrix(from, up);
+  return {
+    ...model,
+    up,
+    nodes: model.nodes.slice(),
+    meshes: model.meshes.map(mesh => makeMesh(mesh.primitives.map(p => transformPrimitive(p, m)))),
+  };
+}

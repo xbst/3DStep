@@ -6,7 +6,7 @@ How the designer turns STEP and GLB files into models and writes them back as GL
 |---|---|
 | `step-import.js` | `importStep(file, options)`: STEP to `Model` through occt-import-js in a worker; `readStepRaw` and `modelFromRaw` split the slow read from the cheap build; `buildModel` is the pure tree mapping; `rawTree` summarizes a read for an import dialog |
 | `occt-worker.js` | Loads occt-import-js (`importScripts`, base URLs tried in order), runs `ReadStepFile`, posts the result back with typed arrays transferred |
-| `model.js` | The `Model` shape (SPEC 13.1) and its operations: `deleteNodes`, `mergeGroup`, `replaceMesh`, `triangleCount`, `bboxOf`, `selectTiny`, `treeOf`, `estimateGlbSize`, `estimateHtmlSize`, `flattenForeign`, `checkModel`; `joinIds` prefixes a model's ids when the project's models already use any of them |
+| `model.js` | The `Model` shape (SPEC 13.1) and its operations: `deleteNodes`, `mergeGroup`, `replaceMesh`, `triangleCount`, `bboxOf`, `selectTiny`, `treeOf`, `estimateGlbSize`, `estimateHtmlSize`, `flattenForeign`, `checkModel`; `joinIds` prefixes a model's ids when the project's models already use any of them; `convertUp` rotates a model to the project's up axis (`upMatrix`, which `glb-reader.js` uses for foreign files) |
 | `glb-writer.js` | `writeGlb(model)`: SPEC 7's conventions, the same as `glb.py`'s writer |
 | `glb-reader.js` | `readGlb(bytes, options)`: 3DStep GLBs round-trip; foreign GLB / glTF files are converted |
 | `simplify.js` | meshoptimizer's simplifier per primitive |

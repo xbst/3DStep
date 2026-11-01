@@ -591,6 +591,10 @@ def build_model(result: dict, *, name: str = "model.glb", merge_bodies=True, min
     "bodies", "names"}`` for each node with several bodies. An ``id_prefix``
     goes in front of every id (:func:`glb.assign_ids`), as the designer puts
     one on a model whose ids another model of its project already uses.
+
+    The model keeps the file's axes and says Z-up: nothing here knows which
+    axis the CAD tool had up, nor a project's, so it is never rotated as the
+    designer rotates a model added to a project with the other up axis.
     """
     return _build(result, name=name, merge_bodies=merge_bodies, min_size=min_size, id_prefix=id_prefix)[0]
 
