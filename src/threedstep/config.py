@@ -777,6 +777,11 @@ def _check_color(token: str, value: str, scope: str, known: bool,
         warnings.append(f"{where} = {value!r} is not a string; ignoring it.")
         return ""
     v = value.strip()
+    if not v:
+        # The caller drops an empty value, so the default color stays.
+        if known:
+            warnings.append(f"{where} is empty; using the default color.")
+        return ""
     if v.lower() in _CSS_COLOR_KEYWORDS or _FUNC_RE.match(v):
         return v
     if _BARE_HEX_RE.match(v) and len(v) in (3, 4, 6, 8):
