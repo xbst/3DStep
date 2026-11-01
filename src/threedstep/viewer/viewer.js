@@ -362,6 +362,17 @@
       Object.keys(placed).forEach(function (id) {
         if (!visible[id]) warnings.push(where + ": '" + id + "' is moved but hidden");
       });
+      // An arrow or label attached to a part (or a group with no member) hidden
+      // in this step is hidden with it, as config.check_ids warns.
+      [["arrow", step.arrows], ["label", step.labels]].forEach(function (pair) {
+        if (!Array.isArray(pair[1])) return;
+        pair[1].forEach(function (a, ai) {
+          var m = a && typeof a.attach === "string" && a.attach ? reg.members[a.attach] : null;
+          if (m && m.length && !m.some(function (p) { return visible[p]; })) {
+            warnings.push(where + ": " + pair[0] + " " + (ai + 1) + " is attached to '" + a.attach + "', which is hidden");
+          }
+        });
+      });
 
       states.push({
         index: i,
@@ -1866,11 +1877,14 @@
       rec.dispose = function () { if (g.parent) g.parent.remove(g); tube.geometry.dispose(); };
       return rec;
     }
-    function attachParent(id) {
+    // The pivot an annotation attached to `id` follows: the part's own, or for a
+    // group the first member visible in the step (`vis`), else its first member.
+    function attachParent(id, vis) {
       if (id && parts[id]) return parts[id].pivot;
       if (id && groupBox[id]) {
-        var members = registry.members[id];
-        for (var i = 0; i < members.length; i++) if (parts[members[i]]) return parts[members[i]].pivot;
+        var members = registry.members[id].filter(function (m) { return parts[m]; });
+        for (var i = 0; i < members.length; i++) if (vis && vis[members[i]]) return parts[members[i]].pivot;
+        if (members.length) return parts[members[0]].pivot;
       }
       return root3;
     }
@@ -1886,7 +1900,7 @@
         var rec = a.kind === "rotate" ? makeRotateArrow(a, selected) : makeStraightArrow(a.color, selected);
         if (rec.kind === "straight") rec.set(a.from, a.to);
         rec.group.traverse(function (o) { o.layers.set(0); });
-        attachParent(a.attach).add(rec.group);
+        attachParent(a.attach, st.visible).add(rec.group);
         rec.spec = a;
         rec.index = i;   // its index in the step's explicit arrows (editor picking)
         arrows.push(rec);
@@ -1948,7 +1962,7 @@
         labelsBox.appendChild(div);
         overlay.appendChild(line);
         overlay.appendChild(dot);
-        labels.push({ spec: spec, div: div, line: line, dot: dot, parent: webgl ? attachParent(spec.attach) : null });
+        labels.push({ spec: spec, div: div, line: line, dot: dot, parent: webgl ? attachParent(spec.attach, st.visible) : null });
       });
       updateLabels();
     }
@@ -1962,6 +1976,8 @@
       var footH = hint.offsetHeight ? h - hint.offsetTop + 4 : 4;
       var cx = w / 2, cy = h / 2;
       labels.forEach(function (l) {
+        // A label attached to a hidden part goes with it, as an arrow attached to it does.
+        if (l.parent && l.parent !== root3 && !l.parent.visible) { l.div.classList.add("is-off"); l.line.classList.add("is-off"); l.dot.classList.add("is-off"); return; }
         var p = new THREE.Vector3().fromArray(l.spec.at);
         if (l.parent) p.applyMatrix4(l.parent.matrixWorld);
         var ndc = p.project(camera);

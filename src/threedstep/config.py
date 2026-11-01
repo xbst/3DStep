@@ -609,7 +609,8 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
     treated as a part). Raises ValueError with one line per unknown id, each
     listing the nearest existing ids. Appends warnings to ``project.warnings``:
     ``[[part]]`` tables for ids no model has, ids two models share, and steps
-    that highlight, ghost or move a part that is hidden in that step.
+    that highlight, ghost or move a part that is hidden in that step, or attach
+    an arrow or label to one.
     """
     fname = project.path.name
     missing = [m for m in project.assembly.models if m not in trees]
@@ -654,7 +655,9 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
         where = f"{fname}: [[step]] #{i + 1} ({step.id})"
         named = [("highlight", nid) for nid in step.highlight] \
             + [("ghost", nid) for nid in step.ghost] \
-            + [("move", nid) for move in step.moves for nid in move.parts]
+            + [("move", nid) for move in step.moves for nid in move.parts] \
+            + [(f"[[step.arrow]] #{j + 1} attach", a.attach) for j, a in enumerate(step.arrows) if a.attach] \
+            + [(f"[[step.label]] #{j + 1} attach", lb.attach) for j, lb in enumerate(step.labels) if lb.attach]
         for key, nid in named:
             parts = nodes.parts_under(nid)
             if parts and not visible.intersection(parts):
