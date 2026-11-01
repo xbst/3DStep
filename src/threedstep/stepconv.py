@@ -22,6 +22,7 @@ from __future__ import annotations
 import io
 import math
 import os
+import re
 import tempfile
 from array import array
 from contextlib import contextmanager
@@ -96,7 +97,7 @@ def glb_name_for(path: str | Path) -> str:
     """The GLB file name the designer gives an imported file: its stem by the
     id rule (``ToqueCAN 2.step`` is ``toquecan_2.glb``), so a project TOML
     written by the designer finds the GLB the command line writes."""
-    stem = Path(path).stem
+    stem = re.sub(r"\.[^.]*$", "", Path(path).name)
     return f"{glb.slugify(stem) if stem else 'model'}.glb"
 
 
