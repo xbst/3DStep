@@ -619,7 +619,8 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
     :func:`threedstep.glb.tree` returns (``{"id", "children", "has_mesh", ...}``)
     or a flat list of ids (which carries no hierarchy, so a group id is then
     treated as a part). Raises ValueError with one line per unknown id, each
-    listing the nearest existing ids. Appends warnings to ``project.warnings``:
+    listing the nearest existing ids, or one line per part that two
+    ``[[step.move]]`` tables of a step reach (through a group). Appends warnings to ``project.warnings``:
     ``[[part]]`` tables for ids no model has, ids two models share, and steps
     that highlight, ghost or move a part that is hidden in that step, or attach
     an arrow or label to one.
@@ -639,6 +640,28 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
 
     errors = [f"{where}: unknown id '{nid}' ({nearest(nid)})"
               for where, nid in _references(project, fname) if nid not in known]
+    if errors:
+        raise ValueError("\n".join(errors))
+
+    # One part in two [[step.move]] of a step is an error. The loader catches an
+    # id written twice; this catches a part reached through a group as well.
+    for i, step in enumerate(project.steps):
+        mover: dict[str, tuple[int, str]] = {}      # part -> (move number, id that named it)
+        for j, move in enumerate(step.moves):
+            reached: dict[str, str] = {}            # part -> the id of this move that reaches it
+            for nid in move.parts:
+                for part in nodes.parts_under(nid):
+                    reached.setdefault(part, nid)
+            for part, nid in reached.items():
+                if part in mover:
+                    k, other = mover[part]
+                    here = f" (through '{nid}')" if nid != part else ""
+                    there = f" (through '{other}')" if other != part else ""
+                    errors.append(f"{fname}: [[step]] #{i + 1} ({step.id}): [[step.move]] #{j + 1}: "
+                                  f"'{part}'{here} is already moved by [[step.move]] #{k}{there} "
+                                  "in this step")
+                else:
+                    mover[part] = (j + 1, nid)
     if errors:
         raise ValueError("\n".join(errors))
 
