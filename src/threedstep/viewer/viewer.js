@@ -2187,6 +2187,7 @@
       opts = opts || {};
       var i = stepIndex(ref);
       if (i < 0 || !states.length) return;
+      if (i === current) return;
       if (!modelsLoaded && webgl) { pendingStep = { ref: ref, opts: opts }; }
       var animate = opts.animate !== false && current >= 0 && !editor;
       var changed = i !== current;
