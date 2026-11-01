@@ -453,15 +453,54 @@
       headRadius: clamp(sceneDiameter * 0.006, 0.5, 6) * s * 2
     };
   }
-  // An auto arrow runs from the displayed center to the assembled center,
-  // shortened at both ends by 0.6 × the part's bounding-sphere radius; it is
-  // omitted (null) when shorter than the head.
-  function autoArrowSpan(displayed, assembled, partRadius, headLength) {
+  // `v` turned by the inverse of the unit quaternion `q` ([x, y, z, w]).
+  function unrotate(v, q) {
+    var x = -q[0], y = -q[1], z = -q[2], w = q[3];
+    var t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])];
+    return [v[0] + w * t[0] + (y * t[2] - z * t[1]), v[1] + w * t[1] + (z * t[0] - x * t[2]), v[2] + w * t[2] + (x * t[1] - y * t[0])];
+  }
+  // How far a box with half extents `half` reaches from its center along the unit vector `dir`.
+  function boxReach(half, dir) {
+    var t = Infinity;
+    for (var k = 0; k < 3; k++) { var a = Math.abs(dir[k]); if (a > 1e-9) t = Math.min(t, half[k] / a); }
+    return t === Infinity ? 0 : t;
+  }
+  // An auto arrow runs along the move in the gap between the part's displayed
+  // box and its assembled box: from the displayed box's face toward the
+  // assembled pose to the assembled box's face toward the displayed one,
+  // `clearance` short of each, so it is never inside the part nor buried in
+  // what the part goes into. `half` is the assembled box's half extents and
+  // `rotation` the displayed turn (a quaternion; null for none). Omitted
+  // (null) when the gap leaves less than the head.
+  function autoArrowSpan(displayed, assembled, half, rotation, headLength, clearance) {
     var d = vsub(assembled, displayed), len = vlen(d);
-    var cut = partRadius * 0.6;
-    if (len - 2 * cut < headLength) return null;
+    if (!(len > 0)) return null;
     var dir = vscale(d, 1 / len);
-    return { from: vadd(displayed, vscale(dir, cut)), to: vsub(assembled, vscale(dir, cut)) };
+    var c = num(clearance, 0);
+    var from = boxReach(half, rotation ? unrotate(dir, rotation) : dir) + c;
+    var to = boxReach(half, dir) + c;
+    if (len - from - to < headLength) return null;
+    return { from: vadd(displayed, vscale(dir, from)), to: vsub(assembled, vscale(dir, to)) };
+  }
+  // Whether the segment a-b runs through the inside of a box (its center,
+  // half extents and turn), as an arrow through another moving part would.
+  function segmentHitsBox(a, b, center, half, rotation) {
+    var p = vsub(a, center), q = vsub(b, center);
+    if (rotation) { p = unrotate(p, rotation); q = unrotate(q, rotation); }
+    var d = vsub(q, p), t0 = 0, t1 = 1;
+    for (var k = 0; k < 3; k++) {
+      var h = half[k] - 1e-6;
+      if (!(h > 0)) return false;
+      if (Math.abs(d[k]) < 1e-12) {
+        if (p[k] <= -h || p[k] >= h) return false;
+        continue;
+      }
+      var u0 = (-h - p[k]) / d[k], u1 = (h - p[k]) / d[k];
+      t0 = Math.max(t0, Math.min(u0, u1));
+      t1 = Math.min(t1, Math.max(u0, u1));
+      if (t0 >= t1) return false;
+    }
+    return true;
   }
 
   // ── Activation (SPEC 9.9), a state machine without DOM ─────────────
@@ -1396,6 +1435,7 @@
           pivot.add(obj);
           root3.add(pivot);
           var center = pbox.getCenter(new THREE.Vector3());
+          var halfSize = pbox.getSize(new THREE.Vector3()).multiplyScalar(0.5);
           var meta = scene.parts && scene.parts[info.id];
           var colors = meshes.map(function (m) {
             var c = new THREE.Color(0.8, 0.8, 0.8);
@@ -1406,7 +1446,7 @@
           var doubleSided = meshes.some(function (m) { return m.material && m.material.side === THREE.DoubleSide; });
           var part = {
             id: info.id, label: info.label, obj: obj, pivot: pivot, meshes: meshes, colors: colors,
-            box: pbox, center: center, radius: pbox.getSize(new THREE.Vector3()).length() / 2,
+            box: pbox, center: center, half: [halfSize.x, halfSize.y, halfSize.z],
             doubleSided: doubleSided, mats: {},
             cls: "normal", alpha: 1, visible: true, selected: false,
             offset: new THREE.Vector3(), quat: new THREE.Quaternion(), pivotCenter: center.clone(),
@@ -2044,7 +2084,7 @@
         rec.index = i;   // its index in the step's explicit arrows (editor picking)
         arrows.push(rec);
       });
-      // auto arrows: one per moved part, from the displayed to the assembled center
+      // auto arrows: one per moved part, between its displayed and assembled boxes
       partList.forEach(function (part) {
         var p = st.placed[part.id];
         if (!p || !p.arrow || !st.visible[part.id]) return;
@@ -2058,12 +2098,25 @@
     }
     function updateAutoArrows() {
       var s = sizes();
+      if (!arrows.some(function (rec) { return rec.auto; })) return;
+      // The parts shown away from their assembled pose: an arrow that would run
+      // through one of them (a hub over its fan's frame, the parts of a moved
+      // sub-assembly) is left out, and the part in front keeps its own.
+      var away = [];
+      partList.forEach(function (part) {
+        if (!part.visible || part.alpha <= 0) return;
+        if (part.offset.lengthSq() < 1e-12 && Math.abs(part.quat.w) > 1 - 1e-12) return;
+        var c = displayedCenter(part), q = part.quat;
+        away.push({ part: part, center: [c.x, c.y, c.z], rotation: [q.x, q.y, q.z, q.w] });
+      });
       arrows.forEach(function (rec) {
         if (!rec.auto) return;
         var part = rec.auto;
         if (!part.visible || part.alpha <= 0) { rec.group.visible = false; return; }
-        var disp = displayedCenter(part);
-        var span = autoArrowSpan([disp.x, disp.y, disp.z], [part.center.x, part.center.y, part.center.z], part.radius, s.headLength);
+        var disp = displayedCenter(part), q = part.quat;
+        var span = autoArrowSpan([disp.x, disp.y, disp.z], [part.center.x, part.center.y, part.center.z], part.half,
+          [q.x, q.y, q.z, q.w], s.headLength, s.shaftRadius);
+        if (span && away.some(function (o) { return o.part !== part && segmentHitsBox(span.from, span.to, o.center, o.part.half, o.rotation); })) span = null;
         if (!span) { rec.group.visible = false; return; }
         rec.set(span.from, span.to);
       });
@@ -2813,7 +2866,8 @@
       _debug: {
         setFullscreenClass: setFullscreenClass, tokens: function () { return tokens; }, parts: function () { return parts; },
         scene3: function () { return scene3; }, resolveCamera: resolveCamera, isVisible: function () { return visible; },
-        controls: function () { return controls; }, behavior: behavior
+        controls: function () { return controls; }, behavior: behavior,
+        arrows: function () { return arrows; }
       }
     });
 
@@ -2956,6 +3010,7 @@
       fitCamera: fitCamera,
       arrowSizes: arrowSizes,
       autoArrowSpan: autoArrowSpan,
+      segmentHitsBox: segmentHitsBox,
       edgeKernel: edgeKernel,
       createActivation: createActivation,
       createHeightReporter: createHeightReporter,
