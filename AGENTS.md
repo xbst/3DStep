@@ -97,16 +97,17 @@ Nothing needs regenerating after editing a theme: the designer reads it through 
 
 ## Documentation
 
-The docs will live in [doctools-docs](https://github.com/xbst/doctools-docs) (a sibling checkout, `..\doctools-docs`), the Zensical site shared with PinConnect and md-iframe, under `docs/3dstep/`. Topics shared by every tool (publishing from CI, light and dark mode, theming) are under its `docs/guides/`.
+The docs live in [doctools-docs](https://github.com/xbst/doctools-docs) (a sibling checkout, `..\doctools-docs`), the Zensical site shared with PinConnect and md-iframe, under `docs/3dstep/`; the sources of its live examples are in `docs/3d/` (this repository's example, rendered by its CI) and its images in `docs/assets/3dstep/`, made by its `tools/3dstep-*` generators. Topics shared by every tool (publishing from CI, light and dark mode) are under its `docs/guides/`.
 
-- **A behavior change here usually needs a docs change there.** Make it in doctools-docs in step with the code change, as a commit in that repository, and mention it in this one's commit message.
+- **A behavior change here usually needs a docs change there.** Make it in doctools-docs in step with the code change, as a commit in that repository, and mention it in this one's commit message. Its references follow the code: `reference/project-toml.md` and `themes.md` follow `config.py`, `reference/page.md` follows `viewer.js` (controls, keys, URL parameters, messages), `designer.md` the designer's tools, shortcuts and dialogs, and `command-line.md` `cli.py`.
+- **The README's animation**, `assets/3dstep-demo.gif`, is made by a local-only `tools/demo-gif/` (git-ignored, like PinConnect's), which records the example's page with Playwright. The docs site's home page shows a copy; rerun it when the page changes enough that the demo looks stale.
 
 ## Conventions
 
 - **Docs use one line per paragraph.** GitHub's Markdown viewer soft-wraps, so do not hard-wrap prose in the README, this file or doctools-docs.
 - **Code, comments and docs are US English.** Prose uses `colors`, `behaviors`, `gray`, `labeled`, matching the TOML keys users type.
 - **Commit messages** are a short imperative sentence ("Add the step panel", "Fix the edge pass on Safari"), no conventional-commit prefixes.
-- **Generated and ephemeral files are git-ignored** through a local-only `.gitignore` (it ignores itself, as in PinConnect, so a fresh clone or worktree has none: copy it in). Never commit `*.3dstep.html`, `src/threedstep/designer/threedstep.zip`, `tests/`, `venv/` or `tools/vendor/cache/`.
+- **Generated and ephemeral files are git-ignored** through a local-only `.gitignore` (it ignores itself, as in PinConnect, so a fresh clone or worktree has none: copy it in). Never commit `*.3dstep.html`, `src/threedstep/designer/threedstep.zip`, `tests/`, `venv/`, `tools/vendor/cache/` or `tools/demo-gif/`.
 - **No new runtime dependencies without reason.** `3dstep` relies only on the standard library (`tomllib`, with a `tomli` fallback below 3.11); the optional `step` extra is the one exception, imported lazily by the convert mode only. The designer and the viewer are dependency-free at runtime apart from the vendored, committed libraries and Pyodide from a CDN.
 
 ## Verifying changes
