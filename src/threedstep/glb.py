@@ -95,8 +95,9 @@ def read_glb(data: bytes) -> GlbDoc:
             if chunk_type != _CHUNK_JSON:
                 raise ValueError("the first GLB chunk is not JSON")
             try:
-                # Padding is spaces by the spec; some writers use zeros.
-                parsed = json.loads(data[start:end].rstrip(b" \x00").decode("utf-8"))
+                # Padding is spaces by the spec, which json.loads skips. A chunk
+                # padded with zeros is refused, as Three.js's JSON.parse would.
+                parsed = json.loads(data[start:end].decode("utf-8"))
             except (UnicodeDecodeError, ValueError) as e:
                 raise ValueError(f"the GLB's JSON chunk does not parse: {e}") from None
             if not isinstance(parsed, dict):

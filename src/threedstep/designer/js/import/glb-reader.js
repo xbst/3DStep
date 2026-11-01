@@ -50,7 +50,10 @@ export function isGlb(data) {
   return b.length >= 4 && new DataView(b.buffer, b.byteOffset, 4).getUint32(0, true) === MAGIC;
 }
 
-// The JSON chunk and the BIN chunk (or null) of a GLB.
+// The JSON chunk and the BIN chunk (or null) of a GLB. As strict about the
+// container as glb.read_glb, so the designer refuses at import what Generate
+// and the command line would refuse: the JSON chunk comes first and the
+// header's length is the file's.
 export function parseGlb(data) {
   const b = asBytes(data);
   if (b.length < 20) throw new GlbError("not a GLB file (it is too short)");
@@ -59,16 +62,18 @@ export function parseGlb(data) {
   const version = dv.getUint32(4, true);
   if (version !== 2) throw new GlbError(`this is a glTF ${version} binary; only glTF 2.0 is supported`);
   const length = dv.getUint32(8, true);
-  if (length > b.length) throw new GlbError(`the GLB header says ${length} bytes, but the file has ${b.length}`);
+  if (length !== b.length) throw new GlbError(`the GLB header says ${length} bytes, but the file has ${b.length}`);
   let offset = 12;
   let json = null;
   let bin = null;
-  while (offset + 8 <= length) {
+  while (offset < length) {
+    if (offset + 8 > length) throw new GlbError("a GLB chunk header runs past the end of the file");
     const size = dv.getUint32(offset, true);
     const type = dv.getUint32(offset + 4, true);
     const start = offset + 8;
     if (start + size > length) throw new GlbError("a GLB chunk runs past the end of the file");
-    if (type === CHUNK_JSON && json === null) {
+    if (json === null) {
+      if (type !== CHUNK_JSON) throw new GlbError("the first GLB chunk is not JSON");
       try {
         json = JSON.parse(new TextDecoder().decode(b.subarray(start, start + size)));
       } catch (err) {
