@@ -6,7 +6,7 @@
 // In:  { baseUrls: [absolute URLs ending in "/"], file: File | ArrayBuffer, name, params }
 // Out: { type: "progress", phase, bytes? }
 //      { type: "result", result, timings, heapBytes, base }   (arrays as typed arrays, transferred)
-//      { type: "error", kind, message, log, heapBytes }
+//      { type: "error", kind, message, log, heapBytes, unmeshed }   (unmeshed: no body got triangles)
 /* global occtimportjs */
 "use strict";
 
@@ -44,6 +44,13 @@ async function loadLibrary(baseUrls) {
 
 function heapBytes(occt) {
   return occt && occt.HEAPU8 ? occt.HEAPU8.length : 0;
+}
+
+// occt-import-js's heap stops growing at 2 GB.
+const HEAP_CAP = 2048 * 1024 * 1024;
+
+function triangleCount(mesh) {
+  return mesh.index && mesh.index.array ? mesh.index.array.length : 0;
 }
 
 // occt-import-js gives plain arrays; typed arrays transfer without a copy
@@ -97,6 +104,17 @@ self.onmessage = async function (ev) {
       error.kind = "read";
       throw error;
     }
+    // At its heap cap the reader can still report success, with the bodies
+    // it had no memory left to mesh coming back without triangles (a 71.5 MB
+    // file fills the heap while reading and gets none at all).
+    const meshes = result.meshes || [];
+    const empty = meshes.filter(m => !triangleCount(m)).length;
+    if (empty && heapBytes(occt) >= HEAP_CAP) {
+      const error = new Error(`${empty} of ${meshes.length} bodies came back without triangles at the 2 GB heap limit`);
+      error.kind = "memory";
+      error.unmeshed = empty === meshes.length;
+      throw error;
+    }
 
     post("progress", { phase: "convert" });
     const transfer = [];
@@ -119,6 +137,7 @@ self.onmessage = async function (ev) {
       message: String((err && err.message) || err),
       log: log.slice(-20),
       heapBytes: heapBytes(occt),
+      unmeshed: !!(err && err.unmeshed),
     });
   }
 };

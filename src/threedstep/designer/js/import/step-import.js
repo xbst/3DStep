@@ -64,7 +64,12 @@ function resolveBase(url) {
   return href.endsWith("/") ? href : href + "/";
 }
 
-function memoryMessage(name) {
+function memoryMessage(name, unmeshed) {
+  // Reading alone filled the heap: a coarser mesh would not help.
+  if (unmeshed) {
+    return `Out of memory while reading ${name}: reading the file took all of the 2 GB the STEP reader can use, ` +
+      "leaving nothing to mesh it with. Split the assembly into smaller STEP files (a project can hold several).";
+  }
   return `Out of memory while reading ${name}: the STEP reader can use at most 2 GB. ` +
     "Import it with the coarse quality, or split the assembly into smaller STEP files.";
 }
@@ -108,7 +113,7 @@ export function readStepRaw(file, { baseUrls = [VENDOR_BASE], quality, deflectio
       } else if (msg.type === "result") {
         finish(resolve, msg);
       } else if (msg.type === "error") {
-        const message = msg.kind === "memory" ? memoryMessage(name)
+        const message = msg.kind === "memory" ? memoryMessage(name, msg.unmeshed)
           : msg.kind === "read" ? `${name} could not be read as a STEP file.${msg.log.length ? ` The reader said: ${msg.log.slice(-3).join(" ")}` : ""}`
           : msg.kind === "load" ? msg.message
           : `The STEP reader stopped while reading ${name}: ${msg.message}`;
