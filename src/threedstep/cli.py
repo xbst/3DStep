@@ -42,6 +42,14 @@ def _same_file(a: Path, b: Path) -> bool:
         return False
 
 
+def _check_not_a_folder(out_path: Path, default_name: str) -> None:
+    """Refuse an output path that names a folder. Opening one fails with
+    "Permission denied" on Windows, which reads like a permissions problem."""
+    if out_path.is_dir():
+        _error(f"the output is a folder, not a file: {out_path} "
+               f"(give a file name, such as {out_path / default_name})")
+
+
 def _render_inputs(project_path: Path, theme_name: str) -> list[tuple[str, Path]]:
     """The files a render reads that an output path must not replace: the
     project, every model it names, and the theme file, if one was found."""
@@ -85,7 +93,9 @@ def _render(args: argparse.Namespace) -> None:
     for warning in page.warnings:
         print(f"Warning: {warning}", file=sys.stderr)
 
-    out_path: Path = args.output or project_path.with_suffix(".3dstep.html")
+    default_name = project_path.with_suffix(".3dstep.html").name
+    out_path: Path = args.output or project_path.parent / default_name
+    _check_not_a_folder(out_path, default_name)
     # build_page has read every input already, so writing over one would succeed
     # and silently destroy the author's project, model or theme.
     for what, source in _render_inputs(project_path, args.theme or ""):
@@ -117,7 +127,9 @@ def _convert(args: argparse.Namespace) -> None:
         _error(f"STEP file not found: {step_path}")
     # The name the designer gives the same import, so a project it wrote finds
     # the GLB this regenerates.
-    out_path: Path = args.output or step_path.with_name(stepconv.glb_name_for(step_path))
+    default_name = stepconv.glb_name_for(step_path)
+    out_path: Path = args.output or step_path.with_name(default_name)
+    _check_not_a_folder(out_path, default_name)
     if _same_file(out_path, step_path):
         _error(f"the output would overwrite the STEP file: {step_path}")
     try:
