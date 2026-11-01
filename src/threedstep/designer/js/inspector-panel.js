@@ -221,8 +221,8 @@ export class InspectorPanel {
         `<label class="check"><input type="checkbox" id="insp-hi"> Highlight</label>` +
         `<label class="check"><input type="checkbox" id="insp-gh"> Ghost</label></div>` +
         `<div class="insp-section">Move <button class="small-btn" data-act="assemble" title="Back to the assembled pose in this step">Assemble</button></div>` +
-        `<div class="insp-row"><span class="insp-label">Offset mm</span>${vecInputs("insp-offset", "Offset")}</div>` +
-        `<div class="insp-row"><span class="insp-label">Rotate °</span>${vecInputs("insp-rotate", "Rotate")}</div>` +
+        `<div class="insp-row vec-row"><span class="insp-label">Offset mm</span>${vecInputs("insp-offset", "Offset")}</div>` +
+        `<div class="insp-row vec-row"><span class="insp-label">Rotate °</span>${vecInputs("insp-rotate", "Rotate")}</div>` +
         `<div class="insp-row"><span class="insp-label"></span><label class="check"><input type="checkbox" id="insp-arrow"> Auto arrow to the assembled pose</label></div>` +
         `<p class="insp-note" id="insp-move-note"></p>` +
         `<div class="insp-buttons"><button class="small-btn" data-act="tool-move" title="Drag the selection in the viewport (G)">Move</button>` +
@@ -307,8 +307,8 @@ export class InspectorPanel {
       `<button class="small-btn" data-act="back" style="margin-left:auto">Step</button></div>` +
       `<div class="insp-row"><label for="insp-kind">Kind</label><select id="insp-kind" class="field-select">` +
       ARROW_KINDS.map((k) => `<option value="${k}">${k === "rotate" ? "Rotate (around an axis)" : "Straight"}</option>`).join("") + `</select></div>` +
-      `<div class="insp-row"><span class="insp-label">${rotate ? "Center" : "From"}</span>${vecInputs("insp-from", "From")}${this._pickButton("from")}</div>` +
-      `<div class="insp-row"><span class="insp-label">${rotate ? "Axis to" : "To"}</span>${vecInputs("insp-to", "To")}${this._pickButton("to")}</div>` +
+      `<div class="insp-row vec-row"><span class="insp-label">${rotate ? "Center" : "From"}</span>${vecInputs("insp-from", "From")}${this._pickButton("from")}</div>` +
+      `<div class="insp-row vec-row"><span class="insp-label">${rotate ? "Axis to" : "To"}</span>${vecInputs("insp-to", "To")}${this._pickButton("to")}</div>` +
       (rotate ? `<div class="insp-row"><label for="insp-turns">Turns</label><input id="insp-turns" class="field-input" type="number" step="0.05" title="A fraction of a turn; negative turns counterclockwise seen from the center toward the axis point"></div>` +
         `<div class="insp-row"><label for="insp-radius">Radius mm</label><input id="insp-radius" class="field-input" type="number" step="0.5" min="0.1"></div>` : "") +
       `<div class="insp-row"><label for="insp-acolor">Color</label><input id="insp-acolor" class="field-input" placeholder="the theme's arrow color" autocomplete="off" spellcheck="false"></div>` +
@@ -354,7 +354,7 @@ export class InspectorPanel {
       `<div class="insp-head"><span class="insp-kind">Label ${m.index + 1}</span><span class="insp-sub">step ${this.state.currentStep + 1}</span>` +
       `<button class="small-btn" data-act="back" style="margin-left:auto">Step</button></div>` +
       `<div class="insp-row"><label for="insp-ltext">Text</label><input id="insp-ltext" class="field-input" autocomplete="off"></div>` +
-      `<div class="insp-row"><span class="insp-label">Anchor</span>${vecInputs("insp-at", "Anchor")}${this._pickButton("at")}</div>` +
+      `<div class="insp-row vec-row"><span class="insp-label">Anchor</span>${vecInputs("insp-at", "Anchor")}${this._pickButton("at")}</div>` +
       `<div class="insp-row"><label for="insp-side">Side</label><select id="insp-side" class="field-select">` +
       LABEL_SIDES.map((s) => `<option value="${s}">${s === "auto" ? "Auto (away from the center)" : s[0].toUpperCase() + s.slice(1)}</option>`).join("") + `</select></div>` +
       `<div class="insp-row"><label for="insp-lattach">Attach</label><input id="insp-lattach" class="field-input" list="insp-ids" placeholder="Optional part id: follows its move" autocomplete="off" spellcheck="false"></div>` +

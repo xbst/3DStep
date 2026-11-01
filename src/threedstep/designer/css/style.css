@@ -580,6 +580,14 @@ html, body {
 .vec { display: flex; gap: 4px; flex: 1; min-width: 0; }
 .vec label { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; font-size: 10px; color: var(--text-muted); }
 .vec input { width: 100%; min-width: 0; padding: 4px 4px; text-align: right; font-family: var(--mono-font); font-size: 11px; }
+/* A vector takes a line of its own under its label (and its Pick button), and
+   its fields drop the spin buttons Chrome keeps room for (the arrow keys still
+   step), so three model coordinates with three decimals fit the default
+   inspector. */
+.insp-row.vec-row { flex-wrap: wrap; row-gap: 4px; }
+.insp-row.vec-row > .vec { order: 1; flex-basis: 100%; }
+.vec input { -moz-appearance: textfield; appearance: textfield; }
+.vec input::-webkit-inner-spin-button, .vec input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .checks { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .check { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; cursor: pointer; }
 .check input { margin: 0; accent-color: var(--accent); cursor: pointer; }
