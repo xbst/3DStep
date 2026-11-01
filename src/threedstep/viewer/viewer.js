@@ -429,19 +429,76 @@
   // Half-height of the orthographic frustum that frames the same view as a
   // perspective camera with `fov` at `distance` from its target.
   function orthoHalfHeight(distance, fovDeg) { return distance * Math.tan(fovDeg * Math.PI / 360); }
-  // The camera that frames a box (bounding sphere + 10% margin) from `dir` (a
-  // unit vector from the target toward the camera).
-  function fitCamera(box, dir, fovDeg, projection, aspect) {
-    var center = [(box.min[0] + box.max[0]) / 2, (box.min[1] + box.max[1]) / 2, (box.min[2] + box.max[2]) / 2];
-    var radius = vlen(vsub(box.max, box.min)) / 2;
-    if (!(radius > 0)) radius = 1;
+  function vdot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+  function vcross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+  function boxCorners(box) {
+    var out = [];
+    for (var i = 0; i < 8; i++) out.push([(i & 1 ? box.max : box.min)[0], (i & 2 ? box.max : box.min)[1], (i & 4 ? box.max : box.min)[2]]);
+    return out;
+  }
+  // The view's right (x), up (y) and back (z = dir) axes, as Three.js's lookAt
+  // sets them for a camera at `dir` from its target with `up`.
+  function viewBasis(dir, up) {
+    var z = vnorm(dir);
+    var x = vcross(up && vlen(up) > 0 ? up : [0, 0, 1], z);
+    if (vlen(x) < 1e-6) x = vcross(Math.abs(z[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], z);
+    x = vnorm(x);
+    return { x: x, y: vcross(z, x), z: z };
+  }
+  // The framed outline's half size × FIT_MARGIN = the free band's half size.
+  var FIT_MARGIN = 1.1;
+  // The camera that frames `points` (the corners of the framed parts' boxes,
+  // or a {min, max} box) from `dir` (a unit vector from the target toward the
+  // camera): their outline, as projected into the view, fills its width or the
+  // band of its height the HUD leaves free (`insets`: the top and bottom
+  // strips it covers, as fractions of the height), whichever is tighter, with
+  // a margin, and sits in the middle of that band; the target is at the depth
+  // of the points' center.
+  function fitCamera(points, dir, fovDeg, projection, aspect, up, insets) {
+    if (!Array.isArray(points)) points = boxCorners(points);
+    if (!points.length) points = boxCorners({ min: [-1, -1, -1], max: [1, 1, 1] });
     var fov = clamp(num(fovDeg, 35), 1, 179);
     var a = num(aspect, 1.6) || 1.6;
-    var half = radius * 1.1 / Math.min(1, a);
-    var distance = projection === "perspective"
-      ? half / Math.sin(fov * Math.PI / 360)
-      : half / Math.tan(fov * Math.PI / 360);
-    return { position: vadd(center, vscale(vnorm(dir), distance)), target: center, fov: fov, projection: projection, radius: radius };
+    var tan = Math.tan(fov * Math.PI / 360);
+    var top = clamp(num(insets && insets.top, 0), 0, 0.4), bottom = clamp(num(insets && insets.bottom, 0), 0, 0.4);
+    // The free band's half height, and how far above the view's middle the target
+    // sits so the band's middle is on the outline's, both in view half heights.
+    var band = 1 - top - bottom, lift = top - bottom;
+    var b = viewBasis(dir, up);
+    var lo = points[0].slice(), hi = points[0].slice();
+    points.forEach(function (p) { for (var k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], p[k]); hi[k] = Math.max(hi[k], p[k]); } });
+    var mid = vscale(vadd(lo, hi), 0.5);
+    var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    points.forEach(function (p) {
+      var q = vsub(p, mid), x = vdot(q, b.x), y = vdot(q, b.y);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    });
+    var center = vadd(mid, vadd(vscale(b.x, (x0 + x1) / 2), vscale(b.y, (y0 + y1) / 2)));
+    var hx = (x1 - x0) / 2, hy = (y1 - y0) / 2;
+    // How far the points reach toward the camera from the outline's middle.
+    var front = 0;
+    points.forEach(function (p) { front = Math.max(front, vdot(vsub(p, center), b.z)); });
+    var distance, half;
+    if (projection === "perspective") {
+      // Each point needs the camera far enough for its own depth.
+      distance = 0;
+      points.forEach(function (p) {
+        var q = vsub(p, center), x = vdot(q, b.x), y = vdot(q, b.y), z = vdot(q, b.z);
+        distance = Math.max(distance, z + Math.abs(y - lift * z * tan) * FIT_MARGIN / (band * tan), z + Math.abs(x) * FIT_MARGIN / (tan * a));
+      });
+      if (!(distance > front)) distance = front + Math.max(hy, hx / a, 1) / tan;
+      half = distance * tan;
+    } else {
+      half = Math.max(hy * FIT_MARGIN / band, hx * FIT_MARGIN / a);
+      if (!(half > 1e-6)) half = Math.max(vlen(vsub(hi, lo)) / 2, 1);
+      // The orthographic view is sized by the distance (orthoHalfHeight); it
+      // also keeps the camera in front of the points, so a switch to
+      // perspective, which keeps the distance, does not start inside them.
+      distance = Math.max(half / tan, front * 1.05);
+      half = distance * tan;
+    }
+    var target = vadd(center, vscale(b.y, lift * half));
+    return { position: vadd(target, vscale(b.z, distance)), target: target, fov: fov, projection: projection };
   }
 
   // ── Arrow math (SPEC 9.7) ──────────────────────────────────────────
@@ -1559,30 +1616,46 @@
       return w / h;
     }
     function defaultDir() { return scene.up === "y" ? DEFAULT_DIR_Y.slice() : DEFAULT_DIR_Z.slice(); }
-    // The box of some ids (every part when `ids` is empty) in their displayed
-    // poses for a step: a part the step moves counts where it is shown, so a
-    // fit over an exploded step frames the explosion.
-    function boxOf(ids, placed) {
-      var b = new THREE.Box3();
-      var list = ids && ids.length ? ids : partList.map(function (p) { return p.id; });
-      list.forEach(function (id) {
-        var members = registry && registry.members[id] ? registry.members[id] : [id];
-        members.forEach(function (pid) {
-          var part = parts[pid];
-          if (!part) return;
-          var p = placed && placed[pid];
-          if (p && (p.offset[0] || p.offset[1] || p.offset[2] || p.rotate[0] || p.rotate[1] || p.rotate[2])) {
-            var q = quatFromRotate(p.rotate), c = pivotCenterFor(part, p);
-            var rc = c.clone().applyQuaternion(q);
-            var m = new THREE.Matrix4().compose(new THREE.Vector3(p.offset[0] + c.x - rc.x, p.offset[1] + c.y - rc.y, p.offset[2] + c.z - rc.z), q, new THREE.Vector3(1, 1, 1));
-            b.union(part.box.clone().applyMatrix4(m));
-          } else {
-            b.union(part.box);
-          }
+    function upDir() { return scene.up === "y" ? [0, 1, 0] : [0, 0, 1]; }
+    // The strip of the view the HUD covers (at the top of a page, at the bottom
+    // in the designer), as a fraction of its height: a fit keeps the parts out
+    // of it, as the labels do.
+    function fitInsets() {
+      var v = view.getBoundingClientRect(), r = hud.getBoundingClientRect();
+      if (!(v.height >= 2) || !(r.height > 0)) return null;
+      if (r.top + r.height / 2 < v.top + v.height / 2) return { top: (r.bottom - v.top + 4) / v.height, bottom: 0 };
+      return { top: 0, bottom: (v.bottom - r.top + 4) / v.height };
+    }
+    // What a camera frames for some ids (every part when `ids` is empty) in a
+    // step's state `st`: the corners of each part's box where the step shows
+    // it, and for a moved part where it lands too, so its arrow and its Play
+    // stay in view (a fit over an exploded step frames the explosion).
+    function framePoints(ids, st) {
+      var placed = st ? st.placed : null;
+      var listed = partList;
+      if (ids && ids.length) {
+        var seen = {};
+        listed = [];
+        ids.forEach(function (id) {
+          var members = registry && registry.members[id] ? registry.members[id] : [id];
+          members.forEach(function (pid) { if (parts[pid] && !seen[pid]) { seen[pid] = true; listed.push(parts[pid]); } });
         });
+      }
+      var chosen = listed.length ? listed : partList;
+      var points = [];
+      chosen.forEach(function (part) {
+        var corners = boxCorners({ min: part.box.min.toArray(), max: part.box.max.toArray() });
+        Array.prototype.push.apply(points, corners);
+        var p = placed && placed[part.id];
+        if (p && (p.offset[0] || p.offset[1] || p.offset[2] || p.rotate[0] || p.rotate[1] || p.rotate[2])) {
+          var q = quatFromRotate(p.rotate), c = pivotCenterFor(part, p);
+          var rc = c.clone().applyQuaternion(q);
+          var m = new THREE.Matrix4().compose(new THREE.Vector3(p.offset[0] + c.x - rc.x, p.offset[1] + c.y - rc.y, p.offset[2] + c.z - rc.z), q, new THREE.Vector3(1, 1, 1));
+          corners.forEach(function (k) { points.push(new THREE.Vector3().fromArray(k).applyMatrix4(m).toArray()); });
+        }
       });
-      if (b.isEmpty()) b.copy(modelBox);
-      return { min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] };
+      if (!points.length && modelBox) points = boxCorners({ min: modelBox.min.toArray(), max: modelBox.max.toArray() });
+      return points;
     }
     // The concrete camera of a step: explicit, or fit/auto resolved from the
     // previous step's direction (cached per step index). Step 1 inherits the
@@ -1598,12 +1671,11 @@
       for (var k = 0; k <= i; k++) {
         var spec = states[k] ? states[k].camera : null;
         var cam;
-        var placed = states[k] ? states[k].placed : null;
         if (camCache[k]) { cam = camCache[k]; }
         else if (!spec || spec.kind === "auto") {
-          cam = fitCamera(boxOf(null, placed), prevDir, spec ? spec.fov : 35, spec ? spec.projection : "orthographic", aspect());
+          cam = fitCamera(framePoints(null, states[k]), prevDir, spec ? spec.fov : 35, spec ? spec.projection : "orthographic", aspect(), upDir(), fitInsets());
         } else if (spec.kind === "fit") {
-          cam = fitCamera(boxOf(spec.fit, placed), prevDir, spec.fov, spec.projection, aspect());
+          cam = fitCamera(framePoints(spec.fit, states[k]), prevDir, spec.fov, spec.projection, aspect(), upDir(), fitInsets());
         } else {
           cam = { position: spec.position.slice(), target: spec.target.slice(), fov: spec.fov, projection: spec.projection };
         }
@@ -1619,7 +1691,7 @@
       if (home && isVec3(home.position) && isVec3(home.target)) {
         return { position: vec3(home.position), target: vec3(home.target), fov: num(home.fov, 35), projection: home.projection === "perspective" ? "perspective" : "orthographic" };
       }
-      return fitCamera(boxOf(null, null), defaultDir(), 35, "orthographic", aspect());
+      return fitCamera(framePoints(null, null), defaultDir(), 35, "orthographic", aspect(), upDir(), fitInsets());
     }
 
     // Apply a camera spec {position, target, fov, projection} instantly.
@@ -2772,7 +2844,7 @@
       opts = opts || {};
       var cam = getCamera();
       var dir = vnorm(vsub(cam.position, cam.target));
-      var next = fitCamera(boxOf(ids && ids.length ? ids : null, states[current] ? states[current].placed : null), dir, cam.fov, cam.projection, aspect());
+      var next = fitCamera(framePoints(ids && ids.length ? ids : null, states[current] || null), dir, cam.fov, cam.projection, aspect(), upDir(), fitInsets());
       flyTo(next, opts.animate === false ? 0 : behavior.transitionMs / 2, null);
     }
     function screenshot(type) {
@@ -2867,7 +2939,7 @@
         setFullscreenClass: setFullscreenClass, tokens: function () { return tokens; }, parts: function () { return parts; },
         scene3: function () { return scene3; }, resolveCamera: resolveCamera, isVisible: function () { return visible; },
         controls: function () { return controls; }, behavior: behavior,
-        arrows: function () { return arrows; }
+        camera: function () { return camera; }, arrows: function () { return arrows; }, fitInsets: fitInsets
       }
     });
 
@@ -3008,6 +3080,8 @@
       escapeHtml: escapeHtml,
       orthoHalfHeight: orthoHalfHeight,
       fitCamera: fitCamera,
+      viewBasis: viewBasis,
+      FIT_MARGIN: FIT_MARGIN,
       arrowSizes: arrowSizes,
       autoArrowSpan: autoArrowSpan,
       segmentHitsBox: segmentHitsBox,
