@@ -360,6 +360,13 @@ def read_step(path: str | Path, *, linear_deflection: float = 0.001, angular_def
                          ratio=linear_deflection_type != "absolute_value")
         except _Unreadable as e:
             reason = str(e)
+        except Exception as e:
+            # OpenCascade can also fail while meshing or walking the document.
+            # OCP raises its failures as classes of its own modules, each
+            # deriving from Exception directly (not from Standard_Failure).
+            if type(e).__module__.split(".")[0] != "OCP":
+                raise
+            reason = str(e) or type(e).__name__
     reason = reason or " ".join(said[-3:])
     raise ValueError(f"{path.name} could not be read as a STEP file" + (f": {reason}" if reason else ""))
 
