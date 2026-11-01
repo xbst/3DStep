@@ -943,8 +943,15 @@
       kicker.textContent = fmt(STR.stepOf, { n: i + 1, total: total });
       stepTitle.textContent = st.title;
       if (behavior.showParts && st.highlightIds.length) {
-        partsEl.innerHTML = escapeHtml(STR.installed) + st.highlightIds.map(function (id) {
-          return "<span>" + escapeHtml(partName(id)) + "</span>";
+        // Equal names once, counted: four screws read "4× M3 screw".
+        var named = [], at = Object.create(null);
+        st.highlightIds.forEach(function (id) {
+          var name = partName(id);
+          if (at[name] != null) named[at[name]].count++;
+          else { at[name] = named.length; named.push({ name: name, count: 1 }); }
+        });
+        partsEl.innerHTML = escapeHtml(STR.installed) + named.map(function (p) {
+          return "<span>" + (p.count > 1 ? p.count + "× " : "") + escapeHtml(p.name) + "</span>";
         }).join(", ");
       } else {
         partsEl.textContent = "";
