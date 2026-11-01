@@ -449,6 +449,15 @@ function setupFileIO(editorPanel, viewport, showTab) {
     else if (files.every((f) => /\.glb$/i.test(f.name)) && state.missingModels().length) await openFiles(files, editorPanel, showTab);
     else await importFiles(files.filter((f) => /\.(step|stp|glb|gltf)$/i.test(f.name)), editorPanel, showTab);
   });
+  // A file dropped anywhere else (a panel, the toolbar, a dialog's backdrop)
+  // is refused: left alone, the browser would open it and leave the designer.
+  // The viewport's handlers run first and have already accepted their drops.
+  document.addEventListener("dragover", (e) => {
+    if (!isFiles(e) || e.defaultPrevented) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "none";
+  });
+  document.addEventListener("drop", (e) => { if (isFiles(e)) e.preventDefault(); });
 }
 
 // ── Validation and the status bar ───────────────────────────────────
