@@ -984,11 +984,19 @@ def _parse_font(d: dict, base_dir: Path) -> ThemeFont:
     source = d.get("source", "google")
     if source not in ("google", "bundled", "system"):
         raise ValueError(f"font source must be google|bundled|system, got '{source}'")
+    for key in ("family", "weights", "file"):
+        if key in d and not isinstance(d[key], str):
+            hint = ' like "400;700"' if key == "weights" else ""
+            raise ValueError(f"{key} must be a string{hint}, got {d[key]!r}")
     font = ThemeFont(
-        family=str(d.get("family", "Roboto")),
+        family=d.get("family", "Roboto"),
         source=source,
-        weights=str(d.get("weights", "400;500;600")),
+        weights=d.get("weights", "400;500;600"),
     )
+    # A google or bundled family is written inside single quotes in the CSS.
+    if source != "system" and any(c in font.family for c in "'\\\n"):
+        raise ValueError(f"font family must not contain a quote, a backslash or a line break, "
+                         f"got {font.family!r}")
     if source == "bundled":
         fname = d.get("file", "")
         if not fname:

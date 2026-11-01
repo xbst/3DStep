@@ -12,6 +12,7 @@ import base64
 import html
 import json
 import re
+import urllib.parse
 from dataclasses import dataclass, fields
 from pathlib import Path
 
@@ -134,8 +135,9 @@ def _render_font_head(theme: Theme) -> str:
         if f.source != "google" or f.family in seen:
             continue
         seen.add(f.family)
-        fam = f.family.replace(" ", "+")
-        specs.append(f"{fam}:wght@{f.weights}" if f.weights else fam)
+        fam = urllib.parse.quote_plus(f.family)
+        weights = urllib.parse.quote(f.weights, safe=";,.")
+        specs.append(f"{fam}:wght@{weights}" if weights else fam)
     if not specs:
         return ""
     href = "https://fonts.googleapis.com/css2?family=" + "&family=".join(specs) + "&display=swap"
