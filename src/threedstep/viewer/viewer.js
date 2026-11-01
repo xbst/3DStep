@@ -546,10 +546,64 @@
       var v = cs.getPropertyValue("--tds-" + name).trim();
       if (!v) v = cs.getPropertyValue("--" + name).trim();
       if (!v) v = defaults[name];
+      // a value the browser cannot read as a color takes the scheme's default
+      if (name !== "ghost-opacity" && resolveColor(v) === null) v = defaults[name];
       t[camel(name)] = v;
     });
     t.ghostOpacity = clamp(num(t.ghostOpacity, 0.25), 0, 1);
     return t;
+  }
+
+  // ── CSS colors → sRGB bytes ────────────────────────────────────────
+  // THREE.Color reads only hex, rgb(), hsl() and named colors, and warns
+  // about anything else (transparent, color-mix(), oklch(), an alpha). The
+  // browser resolves any CSS color: a 2D canvas serializes it as #rrggbb or
+  // rgba(), and a form it serializes otherwise (color(), oklch()) is painted
+  // into its one pixel and read back.
+  var colorCtx;
+  var colorCache = {};
+  function colorContext() {
+    if (colorCtx === undefined) {
+      colorCtx = null;
+      try {
+        var c = document.createElement("canvas");
+        c.width = 1;
+        c.height = 1;
+        colorCtx = (c.getContext && c.getContext("2d", { willReadFrequently: true })) || null;
+      } catch (e) { colorCtx = null; }
+    }
+    return colorCtx;
+  }
+  // {r, g, b (0 to 255), a (0 to 1)} for a CSS color, null when the value is
+  // not a color, undefined when there is no canvas to ask (Node).
+  function resolveColor(str) {
+    var ctx = colorContext();
+    if (!ctx) return undefined;
+    var s = String(str == null ? "" : str).trim();
+    if (Object.prototype.hasOwnProperty.call(colorCache, s)) return colorCache[s];
+    var out = null;
+    if (s) {
+      // an assignment the canvas cannot parse is ignored: two sentinels tell
+      ctx.fillStyle = "#010203";
+      ctx.fillStyle = s;
+      var v = String(ctx.fillStyle);
+      ctx.fillStyle = "#030201";
+      ctx.fillStyle = s;
+      if (String(ctx.fillStyle) === v) {
+        var m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(v);
+        var f = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)$/.exec(v);
+        if (m) out = { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16), a: 1 };
+        else if (f) out = { r: +f[1], g: +f[2], b: +f[3], a: f[4] === undefined ? 1 : +f[4] };
+        else {
+          ctx.clearRect(0, 0, 1, 1);
+          ctx.fillRect(0, 0, 1, 1);
+          var d = ctx.getImageData(0, 0, 1, 1).data;
+          out = { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+        }
+      }
+    }
+    colorCache[s] = out;
+    return out;
   }
 
   // ── Behaviors from the root's data-* attributes ────────────────────
@@ -1086,7 +1140,11 @@
     }
     function cssColor(str, raw) {
       var c = new THREE.Color();
-      try { c.setStyle(String(str).trim(), raw ? THREE.LinearSRGBColorSpace : THREE.SRGBColorSpace); } catch (e) { c.set(0x808080); }
+      var space = raw ? THREE.LinearSRGBColorSpace : THREE.SRGBColorSpace;
+      var rgb = resolveColor(str);
+      if (rgb) c.setRGB(rgb.r / 255, rgb.g / 255, rgb.b / 255, space);   // the alpha is not used
+      else if (rgb === null) c.set(0x808080);
+      else { try { c.setStyle(String(str).trim(), space); } catch (e) { c.set(0x808080); } }
       return c;
     }
 
@@ -1202,7 +1260,15 @@
         var m = matCache[key];
         if (m.isShaderMaterial) m.uniforms.uFill.value.copy(cssColor(m.userData.fill === "literal" ? m.userData.literal : tokens[m.userData.fill], true));
       });
-      var viewBg = cssColor(tokens.viewBg);
+      // A transparent view shows the page behind it: light the parts from an
+      // opaque bg, else from the scheme's default view background.
+      var skyBase = tokens.viewBg;
+      var vb = resolveColor(skyBase);
+      if (vb && vb.a === 0) {
+        var pb = resolveColor(tokens.bg);
+        skyBase = pb && pb.a === 1 ? tokens.bg : (tokens.dark ? DARK : LIGHT)["view-bg"];
+      }
+      var viewBg = cssColor(skyBase);
       if (lights) {
         lights.hemi.color.copy(viewBg).lerp(new THREE.Color(1, 1, 1), 0.6);
         lights.hemi.groundColor.copy(viewBg).multiplyScalar(0.35);
