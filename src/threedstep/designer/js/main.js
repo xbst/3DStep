@@ -578,6 +578,14 @@ function init() {
       redo();
       return;
     }
+    // Escape in an inspector field (the Label tool leaves the focus in its
+    // text) hands the keyboard back: the field commits as on leaving it, and
+    // the key cancels the tool as it does from the viewport.
+    if (typing && key === "Escape" && active.closest("#panel-inspector")) {
+      active.blur();
+      if (viewport.cancelTool()) e.preventDefault();
+      return;
+    }
     if (typing) return;
     if (viewport.keyDown(e)) {
       e.preventDefault();
