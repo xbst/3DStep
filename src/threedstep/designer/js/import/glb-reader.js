@@ -36,6 +36,37 @@ const UNSUPPORTED = {
 
 export class GlbError extends Error {}
 
+// The checks that keep a malformed document from reaching the code below as
+// a TypeError or RangeError: each names the problem in a GlbError.
+function isObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+function listOf(v, what) {
+  if (v === undefined) return [];
+  if (!Array.isArray(v)) throw new GlbError(`${what} is not a list`);
+  return v;
+}
+
+function isIndex(v) {
+  return Number.isInteger(v) && v >= 0;
+}
+
+function finiteList(v, length) {
+  return Array.isArray(v) && v.length === length && v.every(Number.isFinite);
+}
+
+const TRANSFORMS = { translation: 3, rotation: 4, scale: 3, matrix: 16 };
+
+function checkNode(n, i) {
+  if (!isObject(n)) throw new GlbError(`node ${i} is not an object`);
+  for (const [key, length] of Object.entries(TRANSFORMS)) {
+    if (n[key] !== undefined && !finiteList(n[key], length)) throw new GlbError(`node ${i}: ${key} is not a list of ${length} numbers`);
+  }
+  if (n.mesh !== undefined && !isIndex(n.mesh)) throw new GlbError(`node ${i}: mesh ${JSON.stringify(n.mesh)} is not an index`);
+  if (!listOf(n.children, `node ${i}: children`).every(isIndex)) throw new GlbError(`node ${i}: children are not node indices`);
+}
+
 // ── Containers ─────────────────────────────────────────────────────────
 
 function asBytes(data) {
@@ -99,7 +130,8 @@ function decodeDataUri(uri, what) {
 }
 
 function loadBuffers(json, bin) {
-  return (json.buffers || []).map((buf, i) => {
+  return listOf(json.buffers, "buffers").map((buf, i) => {
+    if (!isObject(buf)) throw new GlbError(`buffer ${i} is not an object`);
     if (buf.uri === undefined) {
       if (i === 0 && bin) return bin;
       throw new GlbError(`buffer ${i} has no data`);
@@ -135,7 +167,8 @@ function readAccessor(json, buffers, index, { indices = false } = {}) {
   const n = TYPE_SIZES[acc.type];
   const size = COMPONENT_BYTES[acc.componentType];
   if (!n || !size) throw new GlbError(`accessor ${index} has an unknown type`);
-  const count = acc.count | 0;
+  if (!isIndex(acc.count)) throw new GlbError(`accessor ${index} has no valid count`);
+  const count = acc.count;
   const out = indices ? new Uint32Array(count * n) : new Float32Array(count * n);
   const normalized = !!acc.normalized && acc.componentType !== 5126;
 
@@ -147,6 +180,9 @@ function readAccessor(json, buffers, index, { indices = false } = {}) {
     const stride = view.byteStride || n * size;
     const viewStart = view.byteOffset || 0;
     const start = viewStart + (acc.byteOffset || 0);
+    if (!isIndex(stride) || !isIndex(viewStart) || !isIndex(start) || !isIndex(view.byteLength)) {
+      throw new GlbError(`accessor ${index}: its buffer view or offset is not valid`);
+    }
     const end = count ? start + stride * (count - 1) + n * size : start;
     if (end > viewStart + view.byteLength || viewStart + view.byteLength > buf.byteLength) {
       throw new GlbError(`accessor ${index} reads past the end of its buffer`);
@@ -181,6 +217,7 @@ function applySparse(json, buffers, index, out) {
   const acc = json.accessors[index];
   const sp = acc.sparse;
   if (!sp || !(sp.count > 0)) return out;
+  if (!isObject(sp.indices) || !isObject(sp.values)) throw new GlbError(`accessor ${index}: its sparse indices or values are missing`);
   const n = TYPE_SIZES[acc.type];
   const tmp = { ...json, accessors: [
     { bufferView: sp.indices.bufferView, byteOffset: sp.indices.byteOffset || 0, componentType: sp.indices.componentType, count: sp.count, type: "SCALAR" },
@@ -222,10 +259,11 @@ function triangleIndices(mode, idx, count, what, warnings) {
 
 function decodeMesh(json, buffers, m, warnings) {
   const mesh = (json.meshes || [])[m];
-  if (!mesh) throw new GlbError(`mesh ${m} does not exist`);
+  if (!isObject(mesh)) throw new GlbError(`mesh ${m} does not exist`);
   const prims = [];
-  (mesh.primitives || []).forEach((p, k) => {
+  listOf(mesh.primitives, `mesh ${m}: primitives`).forEach((p, k) => {
     const what = `mesh ${mesh.name ? `'${mesh.name}'` : m} primitive ${k}`;
+    if (!isObject(p)) throw new GlbError(`${what} is not an object`);
     if (p.extensions) {
       for (const ext of Object.keys(p.extensions)) {
         if (UNSUPPORTED[ext]) throw new GlbError(`${what} uses ${ext} (${UNSUPPORTED[ext]}), which 3DStep cannot read; export the file again without it`);
@@ -278,7 +316,7 @@ function scaleMatrix(s) {
 }
 
 function checkExtensions(json) {
-  const names = new Set([...(json.extensionsRequired || []), ...(json.extensionsUsed || [])]);
+  const names = new Set([...listOf(json.extensionsRequired, "extensionsRequired"), ...listOf(json.extensionsUsed, "extensionsUsed")]);
   for (const ext of names) {
     if (UNSUPPORTED[ext]) throw new GlbError(`this file uses ${ext} (${UNSUPPORTED[ext]}), which 3DStep cannot read; export it again without ${UNSUPPORTED[ext]}`);
   }
@@ -316,7 +354,12 @@ export function readGlb(data, { name = "model.glb", units = "m", up = "y", targe
   const buffers = loadBuffers(json, bin);
   const warnings = [];
   const meta = threedstepMetadata(json);
-  const nodesJson = json.nodes || [];
+  const nodesJson = listOf(json.nodes, "nodes");
+  nodesJson.forEach(checkNode);
+  const nodeAt = i => {
+    if (!isIndex(i) || i >= nodesJson.length) throw new GlbError(`node ${JSON.stringify(i)} does not exist`);
+    return nodesJson[i];
+  };
 
   // The model-space conversion applied above the roots.
   let root = identityMatrix();
@@ -354,9 +397,8 @@ export function readGlb(data, { name = "model.glb", units = "m", up = "y", targe
   const hasGeometry = (i, stack = new Set()) => {
     if (geometry.has(i)) return geometry.get(i);
     if (stack.has(i)) throw new GlbError(`node ${i} is its own ancestor`);
+    const n = nodeAt(i);
     stack.add(i);
-    const n = nodesJson[i];
-    if (!n) throw new GlbError(`node ${i} does not exist`);
     let yes = n.mesh !== undefined && primsOf(n.mesh).length > 0;
     for (const c of n.children || []) if (hasGeometry(c, stack)) yes = true;
     stack.delete(i);
@@ -366,8 +408,10 @@ export function readGlb(data, { name = "model.glb", units = "m", up = "y", targe
 
   // Entries in document order: { gltf, label, id?, src, parent, mesh (glTF mesh index or -1), matrix }.
   const entries = [];
+  const ancestors = new Set();
   const visit = (i, parent, world) => {
-    const n = nodesJson[i];
+    const n = nodeAt(i);
+    if (ancestors.has(i)) throw new GlbError(`node ${i} is its own ancestor`);
     const matrix = multiplyMatrices(world, nodeMatrix(n));
     const kids = n.children || [];
     const extras = n.extras && typeof n.extras === "object" ? n.extras : {};
@@ -376,7 +420,9 @@ export function readGlb(data, { name = "model.glb", units = "m", up = "y", targe
       const e = { id: n.name, label: typeof extras.label === "string" ? extras.label : n.name, src: typeof extras.src === "string" ? extras.src : "", parent, mesh: n.mesh !== undefined ? n.mesh : -1, matrix };
       entries.push(e);
       const self = entries.length - 1;
+      ancestors.add(i);
       for (const c of kids) visit(c, self, matrix);
+      ancestors.delete(i);
       return;
     }
     if (!hasGeometry(i)) return;
@@ -428,6 +474,13 @@ export function readGlb(data, { name = "model.glb", units = "m", up = "y", targe
   });
 
   const flat = flattenForeign({ name, units: modelUnits, up: modelUp, generator: generator || GENERATOR, nodes, meshes });
+  // A transform or an accessor can still give values past the float range.
+  for (const node of flat.nodes) {
+    if (node.mesh < 0) continue;
+    for (const prim of flat.meshes[node.mesh].primitives) {
+      if (!prim.positions.every(Number.isFinite)) throw new GlbError(`part '${node.id}' has positions that are not finite numbers`);
+    }
+  }
   flat.stats = { source: { name, bytes: bytes.byteLength, kind, threedstep: !!meta }, warnings };
   return flat;
 }
