@@ -1594,6 +1594,8 @@
     function switchCamera(cam3) {
       camera = cam3;
       controls.object = cam3;
+      // The HUD button follows the live camera, whatever switched it (a step, Home, setProjection).
+      if (btnProj) btnProj.classList.toggle("is-on", cam3 === cameraP);
       if (lights) {
         if (lights.key.parent) lights.key.parent.remove(lights.key);
         if (lights.target.parent) lights.target.parent.remove(lights.target);
@@ -1659,7 +1661,8 @@
     }
 
     // Fly from the current camera to `cam` over `ms` (0 snaps).
-    var camTween = null;
+    // The flight's projection is `flightProjection`, so setProjection() can retarget a running flight.
+    var camTween = null, flightProjection = "orthographic";
     function flyTo(cam, ms, done) {
       if (camTween) { removeTween(camTween); camTween = null; controls.enabled = true; }
       var projection = cam.projection === "perspective" ? "perspective" : "orthographic";
@@ -1674,12 +1677,13 @@
       var fromFov = from.fov, toFov = clamp(num(cam.fov, fromFov), 1, 179);
       setFlying(true);
       controls.enabled = false;
+      flightProjection = projection;
       camTween = addTween(ms, function (k) {
         var e = easeInOut(k);
         setCameraNow({
           position: [lerp(from.position[0], cam.position[0], e), lerp(from.position[1], cam.position[1], e), lerp(from.position[2], cam.position[2], e)],
           target: [lerp(from.target[0], cam.target[0], e), lerp(from.target[1], cam.target[1], e), lerp(from.target[2], cam.target[2], e)],
-          fov: lerp(fromFov, toFov, e), projection: projection
+          fov: lerp(fromFov, toFov, e), projection: flightProjection
         });
       }, function () {
         camTween = null;
@@ -2471,8 +2475,9 @@
       if ((want === "perspective") === (camera === cameraP)) return;
       var cam = getCamera();
       cam.projection = want;
+      // A running flight finishes in the new projection instead of switching back.
+      if (camTween) flightProjection = want;
       setCameraNow(cam);
-      btnProj.classList.toggle("is-on", want === "perspective");
     }
     function setSelection(ids) {
       selection = Array.isArray(ids) ? ids.slice() : (ids ? [ids] : []);
