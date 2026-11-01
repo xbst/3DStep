@@ -1043,7 +1043,7 @@
       if (hintDone || !(behavior.hintAutohide > 0)) return;
       hintDone = true;
       hint.classList.add("hf");
-      win.setTimeout(function () { hint.classList.add("hh"); hint.classList.remove("hf"); }, 380);
+      win.setTimeout(function () { hint.classList.add("hh"); hint.classList.remove("hf"); requestRender(); }, 380);
     }
     function hintCountdown() {
       if (hintTimer === null && behavior.hintAutohide > 0) hintTimer = win.setTimeout(hideHint, behavior.hintAutohide * 1000);
@@ -1956,6 +1956,10 @@
       if (!labels.length || !webgl) return;
       var w = view.clientWidth, h = view.clientHeight;
       var hudH = behavior.controls === "none" ? 0 : 48;
+      // Keep the bottom strip of the hint pill (and the credit it shrinks to) clear,
+      // as the HUD's strip is at the top; the pill is not displayed in the designer
+      // or with controls = "none", and then only the 4 px margin is kept.
+      var footH = hint.offsetHeight ? h - hint.offsetTop + 4 : 4;
       var cx = w / 2, cy = h / 2;
       labels.forEach(function (l) {
         var p = new THREE.Vector3().fromArray(l.spec.at);
@@ -1980,7 +1984,7 @@
         if (Math.abs(dx) >= Math.abs(dy)) { left = dx > 0 ? ox : ox - bw; top = oy - bh / 2; }
         else { top = dy > 0 ? oy : oy - bh; left = ox - bw / 2; }
         left = clamp(left, 4, Math.max(4, w - bw - 4));
-        top = clamp(top, hudH, Math.max(hudH, h - bh - 4));
+        top = clamp(top, hudH, Math.max(hudH, h - bh - footH));
         l.div.classList.remove("is-off");
         l.div.style.transform = "translate(" + Math.round(left) + "px," + Math.round(top) + "px)";
         if (l.spec.tail) return;
