@@ -3,15 +3,27 @@
 // group about their combined center, and each gets the move that shows it
 // there (geometry.composePlacement). While dragging, the viewer previews the
 // placements (previewPlacement, no scene rebuild); on release one
-// state.setMoves commits them (one undo step per drag); Escape mid-drag puts
-// the parts back. Shift snaps to 1 mm and 5 degrees; a readout follows the
-// pointer.
+// state.setMoves commits them (one undo step per drag) in the step the drag
+// began in, and drops them when the project or the step changed meanwhile
+// (the keys that would change either are held back during a drag); Escape
+// mid-drag puts the parts back. Shift snaps to 1 mm and 5 degrees; a readout
+// follows the pointer.
 
 import { DEG, composePlacement, isIdentityQuat, isZero, quatAxisAngle, roundTo, snapQuat, snapVector, vdot, vsub } from "./geometry.js";
 import { mergeEntries, pivotOf, unitsFor } from "./placement.js";
 
 export const SNAP_MM = 1;
 export const SNAP_DEG = 5;
+
+// The keys held back during a drag: undo, redo and duplicate the step (with
+// Ctrl or Cmd), and outside a field Delete and the step keys.
+const HELD_KEYS = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", "Delete", "Backspace"]);
+function holdsBack(e) {
+  if ((e.ctrlKey || e.metaKey) && ["z", "y", "d"].includes(e.key.toLowerCase())) return true;
+  const t = e.target;
+  if (t && t.matches && (t.matches("input, textarea, select") || t.isContentEditable)) return false;
+  return HELD_KEYS.has(e.key);
+}
 
 const fmt1 = (v) => (Math.abs(v) < 0.05 ? "0" : v.toFixed(1));
 
@@ -28,6 +40,7 @@ export class GizmoTools {
     this.dragging = false;
     this.shift = false;
     this.last = null;        // {translate, rotate, results} of the drag in progress
+    this.dragFrom = null;    // {project, step} the drag in progress began from
     this.pointer = { x: 0, y: 0 };
     viewport.on("ready", () => this._rebuild());
     viewport.on("camera", () => { if (this.tc && this.vp.viewer && this.vp.viewer.editor) this.tc.camera = this.vp.viewer.editor.camera(); });
@@ -35,6 +48,15 @@ export class GizmoTools {
       this.state.on(ev, () => { if (this.mode && !this.dragging) this._attach(); });
     }
     window.addEventListener("keydown", (e) => { if (e.key === "Shift") this._setShift(true); });
+    // During a drag no key may change the project or the step the drag
+    // commits into: capture undo, redo, Ctrl+D, Delete and the step keys
+    // (main.js's and the viewer's own) before anything else sees them. Escape
+    // and the tool keys still end the drag, and a focused field keeps its keys.
+    window.addEventListener("keydown", (e) => {
+      if (!this.dragging || !holdsBack(e)) return;
+      e.stopPropagation();
+      e.preventDefault();
+    }, true);
     window.addEventListener("keyup", (e) => { if (e.key === "Shift") this._setShift(false); });
     window.addEventListener("blur", () => this._setShift(false));
     // Capture phase: before the controls' own pointermove handler, so the
@@ -140,6 +162,7 @@ export class GizmoTools {
     this.dragging = on;
     if (on) {
       this.last = null;
+      this.dragFrom = { project: this.state.project, step: this.state.currentStep };
       if (orbit) { this._orbitWas = orbit.enabled; orbit.enabled = false; }
       this.vp.el.classList.add("is-dragging");
     } else {
@@ -208,6 +231,16 @@ export class GizmoTools {
     return results;
   }
 
+  // Show the units of a dropped drag where the current step places them: the
+  // scene may have been rebuilt meanwhile, then previewed with stale placements.
+  _showCurrent() {
+    const units = this.units.length && this.state.currentStep >= 0 ? unitsFor(this.state, this.units.map((u) => u.id)) : [];
+    if (!units.length) return;
+    this.units = units;
+    this.P = pivotOf(units);
+    this._preview([0, 0, 0], [0, 0, 0, 1]);
+  }
+
   _readout(translate, rotate) {
     if (this.mode === "translate") return `Δ ${translate.map(fmt1).join(", ")} mm${this.shift ? " · snapped" : ""}`;
     const { axis, angle } = quatAxisAngle(rotate);
@@ -225,8 +258,18 @@ export class GizmoTools {
   // Release: one setMoves for the drag, or nothing when nothing moved.
   _commit() {
     const last = this.last;
+    const from = this.dragFrom;
     this.last = null;
+    this.dragFrom = null;
     this.vp.hideReadout();
+    // The placements were computed from the project and step the drag began
+    // with (every state mutation replaces the project): committing them into
+    // another step, or over an undo, would write a move nobody made there.
+    if (last && from && (from.project !== this.state.project || from.step !== this.state.currentStep)) {
+      this._showCurrent();
+      this._attach();
+      return;
+    }
     if (!last || (isZero(last.translate, 1e-6) && isIdentityQuat(last.rotate, 1e-7))) {
       this._attach();
       return;
