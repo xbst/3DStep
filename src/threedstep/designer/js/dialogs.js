@@ -383,10 +383,12 @@ function importStepDialog(file, { taken, up, last }) {
         const node = nodeAt(n.src);
         const counts = new Map();
         for (const i of (node && node.meshes) || []) {
-          const nm = (meshes[i] && meshes[i].name) || "unnamed";
+          // EDA exports number repeated bodies ("TopSilkscreen (12)"): one entry each.
+          const nm = ((meshes[i] && meshes[i].name) || "unnamed").replace(/ \(\d+\)$/, "");
           counts.set(nm, (counts.get(nm) || 0) + 1);
         }
-        names.set(n.src, [...counts].map(([nm, c]) => (c > 1 ? `${nm} ×${c}` : nm)).join(", "));
+        const listed = [...counts].map(([nm, c]) => (c > 1 ? `${nm} ×${c}` : nm));
+        names.set(n.src, listed.slice(0, 12).join(", ") + (listed.length > 12 ? `, and ${listed.length - 12} more names` : ""));
       }
       const split = new Set(opts.merge ? [] : tree.map((n) => n.src));
       let model = null;
