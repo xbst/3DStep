@@ -393,6 +393,32 @@ export function mergeGroup(model, id) {
   });
 }
 
+// Merge several parts into one: the part `keep` gets the primitives of every
+// part under `ids` (a group names the parts under it), joined by color in
+// document order, and the other parts go away, with the groups left without
+// parts. The kept part stays where it is, with its id, label and source. The
+// model unchanged when fewer than two parts are named or `keep` is not one.
+export function mergeParts(model, ids, keep) {
+  const parts = partIndices(model, ids);
+  const k = nodeIndex(model, keep);
+  if (parts.length < 2 || !parts.includes(k)) return model;
+  const prims = [];
+  for (const i of parts) prims.push(...model.meshes[model.nodes[i].mesh].primitives);
+  const merged = makeMesh(mergePrimitives(prims));
+  const drop = new Set(parts.filter(i => i !== k));
+  // A group whose every child goes, goes too; children come after their
+  // parent, so one pass from the end settles nested groups.
+  for (let i = model.nodes.length - 1; i >= 0; i--) {
+    const n = model.nodes[i];
+    if (!isPart(n) && n.children.length && n.children.every(c => drop.has(c))) drop.add(i);
+  }
+  const kept = new Set();
+  model.nodes.forEach((n, i) => { if (!drop.has(i)) kept.add(i); });
+  return rebuild(model, kept, {
+    meshFor: i => (i === k ? merged : (model.nodes[i].mesh >= 0 ? model.meshes[model.nodes[i].mesh] : null)),
+  });
+}
+
 // Give a part (by id, or by mesh index) a new mesh, as after simplifying it.
 // The bounding box and triangle count are recomputed from the primitives.
 export function replaceMesh(model, which, mesh) {

@@ -1,5 +1,5 @@
 // The designer's dialogs: Generate, About, importing a model, simplifying,
-// selecting tiny parts, confirmations. PinConnect's dialogs.js pattern: a
+// selecting tiny parts, merging parts, confirmations. PinConnect's dialogs.js pattern: a
 // modal shell, Escape and the backdrop close it, cleanups run on close.
 
 import * as runtime from "./runtime.js";
@@ -679,6 +679,29 @@ export function openSimplify({ selected = 0, triangles = 0 } = {}) {
       const error = Math.min(10, Math.max(0.1, Number(body.querySelector("#simp-error").value) || 1)) / 100;
       const scope = body.querySelector('input[name="simp-scope"]:checked').value;
       result = { ratio, error, permissive: body.querySelector("#simp-permissive").checked, scope };
+      close();
+    });
+    body.querySelector('[data-act="ok"]').focus();
+  });
+}
+
+// Which of several parts the others merge into: `parts` are [{id, name}] in
+// selection order, the first the default. Resolves to the id kept, or null.
+export function openMergeParts(parts) {
+  return new Promise((resolve) => {
+    let result = null;
+    const { body, close, onClose } = openModal("Merge parts");
+    onClose(() => resolve(result));
+    body.innerHTML =
+      `<p>Merge these ${formatCount(parts.length)} parts into one? The others leave the model, and the steps that name them name the merged part instead. Undo brings them back.</p>` +
+      `<div class="form-grid"><label for="merge-keep">Keep</label>` +
+      `<select id="merge-keep" class="field-select">${parts.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}${p.name !== p.id ? ` (${esc(p.id)})` : ""}</option>`).join("")}</select>` +
+      `<span class="hint">The merged part keeps this part's id, name and place in the tree.</span></div>` +
+      `<div class="modal-foot"><span class="spacer"></span><button class="toolbar-btn" data-act="cancel">Cancel</button>` +
+      `<button class="toolbar-btn primary" data-act="ok">Merge</button></div>`;
+    body.querySelector('[data-act="cancel"]').addEventListener("click", close);
+    body.querySelector('[data-act="ok"]').addEventListener("click", () => {
+      result = body.querySelector("#merge-keep").value;
       close();
     });
     body.querySelector('[data-act="ok"]').focus();
