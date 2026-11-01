@@ -483,7 +483,9 @@ export class ProjectState {
     next.steps.splice(index, 1);
     const targets = folds.filter((_, k) => k !== index);
     this._applyLists(next, rewriteVisibility(next.steps, next.assembly.start, this.registry, targets, { from: index }));
-    const current = Math.min(index, next.steps.length - 1);
+    // The current step stays the same step unless it is the one removed.
+    const c = this.currentStep;
+    const current = index === c ? Math.min(index, next.steps.length - 1) : c > index ? c - 1 : c;
     return this._commit(origin, next, { kind: "step-removed", index }, { currentStep: current });
   }
 
