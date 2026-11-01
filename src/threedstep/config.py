@@ -201,10 +201,19 @@ def _enum(table: dict, key: str, where: str, choices: tuple[str, ...], default: 
     return value
 
 
+def _finite(value: int | float) -> bool:
+    # TOML integers have no size limit, and one past the float range makes
+    # math.isfinite raise OverflowError: it is not a finite number either.
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _number(value: object, where: str, key: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         _fail(where, f"{key} must be a number (got {value!r})")
-    if not math.isfinite(value):
+    if not _finite(value):
         _fail(where, f"{key} must be a finite number (got {value!r})")
     return float(value)
 
@@ -220,7 +229,7 @@ def _vector(value: object, where: str, key: str) -> list[float]:
     if (not isinstance(value, list) or len(value) != 3
             or any(isinstance(c, bool) or not isinstance(c, (int, float)) for c in value)):
         _fail(where, f"{key} must be three numbers like [0.0, 0.0, 10.0] (got {value!r})")
-    if not all(math.isfinite(c) for c in value):
+    if not all(_finite(c) for c in value):
         _fail(where, f"{key} must be three finite numbers (got {value!r})")
     return [float(c) for c in value]
 
@@ -794,6 +803,9 @@ def _check_number_token(token: str, value: object, scope: str, warnings: list[st
         if isinstance(value, bool):
             raise ValueError
         number = float(value.strip() if isinstance(value, str) else value)
+    except OverflowError:
+        # An integer past the float range: as far outside 0 to 1 as infinity.
+        number = math.inf if value > 0 else -math.inf
     except (TypeError, ValueError):
         warnings.append(f"{where} = {value!r} is not a number; ignoring it.")
         return ""
@@ -908,6 +920,8 @@ def _coerce_behavior(key: str, value: object, kind: type, where: str):
         bad("a number")
     try:
         number = float(value.strip()) if isinstance(value, str) else float(value)
+    except OverflowError:
+        bad("a finite number")
     except (TypeError, ValueError):
         bad("a number")
     if not math.isfinite(number):
