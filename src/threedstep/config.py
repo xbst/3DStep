@@ -39,6 +39,7 @@ class Assembly:
     style: str = "lineart"
     up: str = "z"
     start: str = "visible"
+    arrow_scale: float = 1.0    # multiplies every arrow, on top of the theme's
 
 
 @dataclass
@@ -130,7 +131,8 @@ class Project:
 # an error: a misspelled key would otherwise be dropped, and the page would
 # quietly show something other than what the author wrote.
 _TOP_KEYS = ("assembly", "camera", "part", "step")
-_ASSEMBLY_KEYS = ("title", "description", "models", "theme", "theme_dir", "style", "up", "start")
+_ASSEMBLY_KEYS = ("title", "description", "models", "theme", "theme_dir", "style", "up", "start",
+                  "arrow_scale")
 _CAMERA_KEYS = ("position", "target", "fov", "projection")
 _STEP_CAMERA_KEYS = ("position", "target", "fov", "projection", "fit")
 _PART_KEYS = ("id", "name", "color")
@@ -295,6 +297,15 @@ def _load_assembly(raw: dict, fname: str) -> Assembly:
         if models.count(m) > 1:
             _fail(where, f"models lists '{m}' twice")
 
+    # Arrows are sized from the box around every model (arrow_head_length), so
+    # a big context part makes the arrows of a small subject huge; the theme's
+    # [behavior] arrow_scale is site-wide, and this is the project's own lever.
+    arrow_scale = 1.0
+    if "arrow_scale" in a:
+        arrow_scale = _number(a["arrow_scale"], where, "arrow_scale")
+        if arrow_scale <= 0:
+            _fail(where, f"arrow_scale must be greater than 0 (got {a['arrow_scale']!r})")
+
     return Assembly(
         title=title,
         models=list(models),
@@ -304,6 +315,7 @@ def _load_assembly(raw: dict, fname: str) -> Assembly:
         style=_enum(a, "style", where, _STYLES, "lineart"),
         up=_enum(a, "up", where, _UP_AXES, "z"),
         start=_enum(a, "start", where, _STARTS, "visible"),
+        arrow_scale=arrow_scale,
     )
 
 
@@ -708,10 +720,12 @@ def check_ids(project: Project, trees: dict[str, list]) -> None:
 
 def arrow_head_length(boxes: dict[str, dict | None], arrow_scale: float = 1.0) -> float:
     """The length of the viewer's arrowheads in mm (SPEC 9.7): 3% of the
-    diagonal of the box around every model, kept to 2 to 20 mm, times the
-    theme's ``arrow_scale``. ``boxes`` maps each model to its bounding box,
-    ``{"min": [x, y, z], "max": [x, y, z]}`` as :func:`threedstep.glb.bbox`
-    returns it, or None for a model that draws nothing."""
+    diagonal of the box around every model, kept to 2 to 20 mm, times
+    ``arrow_scale``, the theme's ``[behavior] arrow_scale`` multiplied by the
+    project's ``[assembly] arrow_scale`` (the viewer's ``arrowSizes`` applies
+    both). ``boxes`` maps each model to its bounding box, ``{"min": [x, y, z],
+    "max": [x, y, z]}`` as :func:`threedstep.glb.bbox` returns it, or None for
+    a model that draws nothing."""
     lo, hi = [math.inf] * 3, [-math.inf] * 3
     for box in boxes.values():
         if box:
@@ -734,16 +748,18 @@ def check_arrows(project: Project, boxes: dict[str, dict | None], arrow_scale: f
     """Warn about explicit straight arrows the viewer will not draw.
 
     The viewer drops a straight ``[[step.arrow]]`` shorter than its head,
-    whose length comes from the size of the models and the theme
+    whose length comes from the size of the models, the theme and the project
     (:func:`arrow_head_length`), so this needs the models' bounding boxes
     (``boxes``, one per model the project names) and the theme's
-    ``arrow_scale``. Appends one warning per such arrow to
-    ``project.warnings``. An attached arrow's points are in its part's frame,
-    which moves the arrow but keeps its length. Rotate arrows are sized by
-    their radius, so they are left alone.
+    ``arrow_scale``; the project's own ``[assembly] arrow_scale`` is applied
+    here. Appends one warning per such arrow to ``project.warnings``. An
+    attached arrow's points are in its part's frame, which moves the arrow but
+    keeps its length. Rotate arrows are sized by their radius, so they are
+    left alone.
     """
     fname = project.path.name
-    head = arrow_head_length({m: boxes.get(m) for m in project.assembly.models}, arrow_scale)
+    head = arrow_head_length({m: boxes.get(m) for m in project.assembly.models},
+                             arrow_scale * project.assembly.arrow_scale)
     for i, step in enumerate(project.steps):
         for j, arrow in enumerate(step.arrows):
             length = math.dist(arrow.from_, arrow.to)

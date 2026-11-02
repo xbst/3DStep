@@ -570,6 +570,7 @@ const ASSEMBLY = [
   { key: "style", kind: "string", def: "lineart" },
   { key: "up", kind: "string", def: "z" },
   { key: "start", kind: "string", def: "visible" },
+  { key: "arrow_scale", kind: "number", def: 1 },
 ];
 const CAMERA = [
   { key: "position", kind: "vector", required: true },

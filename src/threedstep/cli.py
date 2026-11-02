@@ -30,7 +30,8 @@ the spec is TOML, one [[file]] table per STEP file to write:
   [[file]]
   name = "board.step"         # the file, written in OUT_DIR
   assembly = "Board"          # its assembly: the model's top group, its own per file
-  take = ["Main board"]       # products from --list; "*" takes the rest
+  take = ["Main board"]       # products from --list; "*" takes the rest; "Case/Lid"
+                              # takes a component inside a sub-assembly (--list --depth 2)
 """
 
 _QUALITIES = ("fine", "normal", "coarse")
@@ -341,6 +342,15 @@ def _build_split_parser() -> argparse.ArgumentParser:
         help="Print the top-level components (instances, bodies and product, in "
              "document order) and write nothing.",
     )
+    parser.add_argument(
+        "--depth",
+        type=int,
+        default=None,
+        metavar="N",
+        help="With --list: show the products inside each sub-assembly too, N levels "
+             "down (default 1, the top-level components only), as a path in a "
+             "spec's take names them.",
+    )
     return parser
 
 
@@ -353,8 +363,13 @@ def _print_components(step_name: str, root: str | None, components: list) -> Non
     print(f"{step_name}: {holder}, {total} top-level component{'s' * (total != 1)} "
           f"of {len(components)} product{'s' * (len(components) != 1)}")
     print(f"{'instances':>9}  {'bodies':>6}  product")
-    for c in components:
-        print(f"{c.instances:>9}  {c.bodies:>6}  {c.name or '(no name)'}")
+
+    def rows(products: list, depth: int) -> None:
+        # The products inside a sub-assembly (--depth) indented under it.
+        for c in products:
+            print(f"{c.instances:>9}  {c.bodies:>6}  {'  ' * depth}{c.name or '(no name)'}")
+            rows(c.children, depth + 1)
+    rows(components, 0)
 
 
 def _split(argv: list[str]) -> None:
@@ -368,6 +383,10 @@ def _split(argv: list[str]) -> None:
         if flags:
             parser.error(f"{_verb(flags, 'applies', 'apply')} only to writing the files, "
                          "which --list does not do")
+        if args.depth is not None and args.depth < 1:
+            parser.error(f"--depth must be 1 or more, got {args.depth}")
+    elif args.depth is not None:
+        parser.error("--depth applies only to --list")
     try:
         from . import stepconv
     except ImportError:
@@ -378,7 +397,7 @@ def _split(argv: list[str]) -> None:
         _error(f"STEP file not found: {step_path}")
     if args.list:
         try:
-            root, components = stepconv.list_components(step_path)
+            root, components = stepconv.list_components(step_path, depth=args.depth or 1)
         except MemoryError:
             _error(f"out of memory while reading {step_path.name}")
         except (ValueError, OSError) as e:

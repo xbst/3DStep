@@ -1,12 +1,13 @@
 // The Parts tab: every loaded model's tree with search and multi-select, the
 // current step's eye / highlight / ghost toggles per row, and the model
-// actions (rename, delete, merge a group, isolate, simplify, select tiny
-// parts). The status line shows the triangles and the page size to expect.
+// actions (rename, delete, merge a group or the selected parts, isolate,
+// simplify, select tiny parts). The status line shows the triangles and the
+// page size to expect.
 
 import { expandIds, membersOf } from "./project-model.js";
 import { selectTiny } from "./import/model.js";
 import { simplifyModel } from "./import/simplify.js";
-import { confirmDialog, formatBytes, formatCount, openSelectTiny, openSimplify } from "./dialogs.js";
+import { confirmDialog, formatBytes, formatCount, openMergeParts, openSelectTiny, openSimplify } from "./dialogs.js";
 
 const SVG = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"';
 const EYE = `<svg ${SVG}><path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/></svg>`;
@@ -43,7 +44,7 @@ export class PartsPanel {
           <div class="parts-actions">
             <button class="small-btn" data-act="isolate" title="Show only the selection in this step">Isolate</button>
             <button class="small-btn" data-act="rename" title="Rename the part's display name (F2); its id does not change">Rename</button>
-            <button class="small-btn" data-act="merge" title="Turn the selected group into one part with the group's id">Merge group</button>
+            <button class="small-btn" data-act="merge" title="Turn the selected group into one part with the group's id, or merge the selected parts into one of them">Merge group</button>
             <button class="small-btn danger" data-act="delete" title="Delete the selection from its model (undo brings it back)">Delete</button>
             <button class="small-btn" data-act="simplify" title="Reduce the triangles of the selection, or of every part">Simplify…</button>
             <button class="small-btn" data-act="tiny" title="Select the parts smaller than a size, to delete them together">Select tiny…</button>
@@ -204,9 +205,20 @@ export class PartsPanel {
     btn("isolate").disabled = !has || !this.state.step();
     btn("rename").disabled = parts.length !== 1;
     btn("delete").disabled = !has;
-    btn("merge").disabled = !(parts.length === 1 && this.state.registry.groups.has(parts[0]));
+    const kind = this._mergeKind(parts);
+    btn("merge").disabled = !kind;
+    btn("merge").textContent = kind === "parts" ? "Merge parts" : "Merge group";
     btn("simplify").disabled = !this.state.loadedModels().length;
     btn("tiny").disabled = !this.state.loadedModels().length;
+  }
+
+  // What the merge button does with the selection: turn one group into a
+  // part ("group"), merge two or more parts of one model ("parts"), or nothing.
+  _mergeKind(parts) {
+    const reg = this.state.registry;
+    if (parts.length === 1 && reg.groups.has(parts[0])) return "group";
+    const all = expandIds(reg, parts);
+    return all.length >= 2 && new Set(all.map((p) => reg.model.get(p))).size === 1 ? "parts" : null;
   }
 
   // ── Interaction ────────────────────────────────────────────────────
@@ -341,10 +353,16 @@ export class PartsPanel {
     const parts = st.selection.parts.slice();
     if (act === "isolate") st.isolate(parts);
     else if (act === "rename" && parts.length === 1) this._startRename(parts[0]);
-    else if (act === "merge" && parts.length === 1) {
-      const n = membersOf(st.registry, parts[0]).length;
-      if (await confirmDialog("Merge group", `Merge <strong>${esc(parts[0])}</strong> and the ${formatCount(n)} part${n === 1 ? "" : "s"} under it into one part? Steps that name parts inside it will name the group.`, { ok: "Merge" })) {
-        st.mergeGroup(parts[0]);
+    else if (act === "merge") {
+      const kind = this._mergeKind(parts);
+      if (kind === "group") {
+        const n = membersOf(st.registry, parts[0]).length;
+        if (await confirmDialog("Merge group", `Merge <strong>${esc(parts[0])}</strong> and the ${formatCount(n)} part${n === 1 ? "" : "s"} under it into one part? Steps that name parts inside it will name the group.`, { ok: "Merge" })) {
+          st.mergeGroup(parts[0]);
+        }
+      } else if (kind === "parts") {
+        const keep = await openMergeParts(expandIds(st.registry, parts).map((id) => ({ id, name: st.displayName(id) })));
+        if (keep) st.mergeParts(parts, keep);
       }
     } else if (act === "delete" && parts.length) {
       const n = expandIds(st.registry, parts).length;

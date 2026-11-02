@@ -102,7 +102,7 @@ export class Step {
 
 export class Assembly {
   constructor({ title = DEFAULT_TITLE, description = "", models = [], theme = "default", theme_dir = DEFAULT_THEME_DIR,
-    style = "lineart", up = "z", start = "visible" } = {}) {
+    style = "lineart", up = "z", start = "visible", arrow_scale = 1 } = {}) {
     this.title = title;
     this.description = description;
     this.models = list(models);
@@ -111,6 +111,7 @@ export class Assembly {
     this.style = style;
     this.up = up;
     this.start = start;
+    this.arrow_scale = arrow_scale;   // multiplies every arrow, on top of the theme's
   }
 }
 
@@ -169,6 +170,7 @@ export class Project {
       style: a.style,
       up: a.up,
       start: a.start,
+      arrow_scale: a.arrow_scale,
       camera: home,
       models: a.models.map(name => ({ name })),
       parts: Object.fromEntries(this.parts.map(p => [p.id, { name: p.name, color: p.color }])),
@@ -231,7 +233,7 @@ export class ProjectError extends Error {
 }
 
 const TOP_KEYS = ["assembly", "camera", "part", "step"];
-const ASSEMBLY_KEYS = ["title", "description", "models", "theme", "theme_dir", "style", "up", "start"];
+const ASSEMBLY_KEYS = ["title", "description", "models", "theme", "theme_dir", "style", "up", "start", "arrow_scale"];
 const CAMERA_KEYS = ["position", "target", "fov", "projection"];
 const STEP_CAMERA_KEYS = ["position", "target", "fov", "projection", "fit"];
 const PART_KEYS = ["id", "name", "color"];
@@ -381,6 +383,11 @@ export function projectFromToml(raw, { locate = () => 0 } = {}) {
     if (/^([\\/]|[A-Za-z]:)/.test(m)) fail(["assembly", "models"], where, `models: '${m}' must be a path relative to this file`);
     if (models.filter(x => x === m).length > 1) fail(["assembly", "models"], where, `models lists '${m}' twice`);
   }
+  let arrowScale = 1;
+  if ("arrow_scale" in a) {
+    arrowScale = number(a.arrow_scale, ["assembly", "arrow_scale"], where, "arrow_scale");
+    if (arrowScale <= 0) fail(["assembly", "arrow_scale"], where, `arrow_scale must be greater than 0 (got ${repr(a.arrow_scale)})`);
+  }
   const assembly = new Assembly({
     title,
     models,
@@ -390,6 +397,7 @@ export function projectFromToml(raw, { locate = () => 0 } = {}) {
     style: enumOf(a, "style", ["assembly"], where, STYLES, "lineart"),
     up: enumOf(a, "up", ["assembly"], where, UP_AXES, "z"),
     start: enumOf(a, "start", ["assembly"], where, STARTS, "visible"),
+    arrow_scale: arrowScale,
   });
 
   // [camera]

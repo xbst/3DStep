@@ -8,8 +8,8 @@
 // `change` tells the TOML tab which blocks moved. Visibility is edited through
 // the show / hide deltas, rewritten so that every other step keeps the state
 // it displays (project-model.js does the folding and rewriting). Model
-// operations (import, delete, merge, simplify) snapshot the models too; at
-// most MODEL_SNAPSHOTS of those stay in the history.
+// operations (import, delete, merge a group or parts, simplify) snapshot the
+// models too; at most MODEL_SNAPSHOTS of those stay in the history.
 //
 // Events: project-changed {origin, change}, models-changed {origin},
 // step-changed {index, origin}, selection-changed {selection},
@@ -23,7 +23,7 @@ import {
 import { isValidId } from "./import/ids.js";
 import {
   DEFAULT_RUNTIME_BYTES, bboxOf, convertUp, deleteNodes, deletedIds, estimateGlbSize, glbNameFor, joinIds,
-  mergeGroup as mergeModelGroup, nodeIndex, triangleCount,
+  mergeGroup as mergeModelGroup, mergeParts as mergeModelParts, nodeIds, nodeIndex, triangleCount,
 } from "./import/model.js";
 import { writeGlb } from "./import/glb-writer.js";
 
@@ -889,9 +889,38 @@ export class ProjectState {
     if (!model || !this.registry.groups.has(id)) return false;
     const merged = mergeModelGroup(model, id);
     if (merged === model) return false;
-    const under = new Set(deletedIds(model, [id]));
-    under.delete(id);
-    const oldParts = new Set(membersOf(this.registry, id));
+    return this._commitMerge(origin, name, model, merged, id);
+  }
+
+  // Merge the parts under ids (two or more, all in one model, siblings or
+  // not) into the part `keep`, the first of them by default, which keeps its
+  // id and label. The other parts leave the model, with the groups they leave
+  // empty; references to them name the merged part, as after mergeGroup.
+  mergeParts(ids, keep = null, origin = "visual") {
+    if (!this._prepareMutation(origin)) return false;
+    const parts = expandIds(this.registry, ids);
+    const into = keep || parts[0];
+    const name = parts.length ? this.registry.model.get(parts[0]) : null;
+    const model = name && this.models.get(name);
+    if (!model || parts.length < 2 || !parts.includes(into) || parts.some(p => this.registry.model.get(p) !== name)) return false;
+    const merged = mergeModelParts(model, ids, into);
+    if (merged === model) return false;
+    return this._commitMerge(origin, name, model, merged, into, [into]);
+  }
+
+  // Commit `merged`, the model `name` after a merge of `model` into the part
+  // `kept`, with the project rewritten for the ids that left the model: their
+  // [[part]] tables go; the id lists name the kept part in their place, once
+  // (a group that kept other parts stays, and the kept part is added where a
+  // list no longer reaches it); a move keeps it in the first move that
+  // reaches it (a later move's group that also holds other parts is split
+  // into its other children, which stay moved); arrows and labels attach to
+  // it; and every step shows it where it showed any of the merged parts. The
+  // selection becomes `select`, else the old one mapped the same way.
+  _commitMerge(origin, name, model, merged, kept, select = null) {
+    const after = new Set(nodeIds(merged));
+    const under = new Set(nodeIds(model).filter(x => !after.has(x)));
+    const oldParts = new Set(expandIds(this.registry, [kept, ...under]));
     const folds = this.folds();
     const models = this._modelState();
     models.map.set(name, merged);
@@ -900,9 +929,10 @@ export class ProjectState {
     const swap = list => {
       const out = [];
       for (const x of list) {
-        const y = under.has(x) ? id : x;
+        const y = under.has(x) ? kept : x;
         if (!out.includes(y)) out.push(y);
       }
+      if (!expandIds(reg, out).includes(kept) && expandIds(this.registry, list).some(p => oldParts.has(p))) out.push(kept);
       return out;
     };
     next.parts = next.parts.filter(p => !under.has(p.id));
@@ -915,22 +945,22 @@ export class ProjectState {
       let seen = false;
       for (const m of step.moves) {
         m.parts = swap(m.parts);
-        if (m.parts.includes(id)) {
-          if (seen) m.parts = m.parts.filter(x => x !== id);
+        if (expandIds(reg, m.parts).includes(kept)) {
+          if (seen) m.parts = removeFromIds(reg, m.parts, new Set([kept]));
           seen = true;
         }
       }
       step.moves = step.moves.filter(m => m.parts.length);
-      for (const a of step.arrows) if (under.has(a.attach)) a.attach = id;
-      for (const l of step.labels) if (under.has(l.attach)) l.attach = id;
+      for (const a of step.arrows) if (under.has(a.attach)) a.attach = kept;
+      for (const l of step.labels) if (under.has(l.attach)) l.attach = kept;
     }
     const targets = folds.map(s => {
       const t = new Set([...s].filter(p => !oldParts.has(p)));
-      if ([...oldParts].some(p => s.has(p))) t.add(id);
+      if ([...oldParts].some(p => s.has(p))) t.add(kept);
       return t;
     });
-    this._applyLists(next, rewriteVisibility(next.steps, next.assembly.start, reg, targets, { from: 0, prefer: [id] }));
-    const selection = { ...this.selection, parts: swap(this.selection.parts) };
+    this._applyLists(next, rewriteVisibility(next.steps, next.assembly.start, reg, targets, { from: 0, prefer: [kept] }));
+    const selection = { ...this.selection, parts: select || swap(this.selection.parts) };
     return this._commit(origin, next, { kind: "full" }, { models, selection });
   }
 

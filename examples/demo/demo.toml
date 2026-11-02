@@ -13,6 +13,7 @@ theme_dir = "./themes"
 style = "lineart"
 up = "z"
 start = "hidden"
+arrow_scale = 1.0
 
 [camera]
 position = [116.0, -80.0, 77.0]
