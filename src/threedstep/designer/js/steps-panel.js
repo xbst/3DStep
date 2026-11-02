@@ -5,8 +5,9 @@
 
 import { esc } from "./dialogs.js";
 
-// The arrow scale as the field shows it: a plain number, four decimals at most.
-const fmtScale = (v) => (Number.isFinite(v) ? String(Number(v.toFixed(4))) : "1");
+// The arrow scale as the field shows it: the project's number, unrounded (a
+// small scale rounded away would show a value the field refuses).
+const fmtScale = (v) => (Number.isFinite(v) ? String(v) : "1");
 
 export class StepsPanel {
   constructor(container, state, viewport) {
@@ -66,19 +67,20 @@ export class StepsPanel {
       try { localStorage.setItem("threedstep-designer-assembly-open", this.box.open ? "1" : "0"); } catch (e) { /* storage blocked */ }
     });
     // Fields commit on change (Enter, or leaving the field): one undo step each.
-    // Pending TOML that does not parse refuses the change; show what stands.
+    // Pending TOML that does not parse refuses the change; show what stands,
+    // set here because render() leaves a focused field alone, and a field
+    // still has the focus after Enter or a pick from its list.
+    const a = () => st.project.assembly;
     $("#asm-title").addEventListener("change", (e) => {
       const v = e.target.value.trim();
-      if (!v) { e.target.value = st.project.assembly.title; return; }
-      if (!st.setAssembly({ title: v })) this.render();
+      if (!v || !st.setAssembly({ title: v })) e.target.value = a().title;
     });
-    $("#asm-desc").addEventListener("change", (e) => { if (!st.setAssembly({ description: e.target.value.trim() })) this.render(); });
-    $("#asm-start").addEventListener("change", (e) => { if (!st.setAssembly({ start: e.target.value })) this.render(); });
-    $("#asm-up").addEventListener("change", (e) => { if (!st.setAssembly({ up: e.target.value })) this.render(); });
+    $("#asm-desc").addEventListener("change", (e) => { if (!st.setAssembly({ description: e.target.value.trim() })) e.target.value = a().description.replace(/\n$/, ""); });
+    $("#asm-start").addEventListener("change", (e) => { if (!st.setAssembly({ start: e.target.value })) e.target.value = a().start; });
+    $("#asm-up").addEventListener("change", (e) => { if (!st.setAssembly({ up: e.target.value })) e.target.value = a().up; });
     $("#asm-arrow-scale").addEventListener("change", (e) => {
       const v = Number(e.target.value);
-      if (!(v > 0) || !Number.isFinite(v)) { e.target.value = fmtScale(st.project.assembly.arrow_scale); return; }
-      if (!st.setAssembly({ arrow_scale: v })) this.render();
+      if (!(v > 0) || !Number.isFinite(v) || !st.setAssembly({ arrow_scale: v })) e.target.value = fmtScale(a().arrow_scale);
     });
     $("#asm-home-use").addEventListener("click", () => this.viewport.useViewAsHome());
     $("#asm-home-clear").addEventListener("click", () => st.setCamera(null));
