@@ -1,10 +1,12 @@
 // STEP -> Model (SPEC 13.2). occt-import-js reads and tessellates the file in
-// a worker (occt-worker.js); buildModel turns its result into a Model on the
+// a worker (occt-worker.js), a big file in pieces (step-pieces.js, in
+// pieces-worker.js); buildModel turns its result into a Model on the
 // main thread: the tree mapping, ids assigned before the size filter, colors,
 // typed arrays and bounding boxes. buildModel is pure, so it also runs in Node
 // on a recorded result.
 
 import { assignIds } from "./ids.js";
+import { mergePieceResults } from "./step-pieces.js";
 import {
   DEFAULT_COLOR, GENERATOR, bboxDiagonal, clampColor, computeNormals, createModel, glbNameFor, makeMesh, mergePrimitives,
   primitiveBBox,
@@ -74,10 +76,147 @@ function memoryMessage(name, unmeshed) {
     "Import it with the coarse quality, or split the assembly into smaller STEP files.";
 }
 
-// Run occt-import-js on a STEP file in a fresh worker. Resolves to
-// { result, timings, heapBytes, base } with the library's result (its
-// position, normal and index arrays as typed arrays).
-export function readStepRaw(file, { baseUrls = [VENDOR_BASE], quality, deflection, angle, signal, onProgress, name } = {}) {
+// Run occt-import-js on a STEP file. Resolves to { result, timings,
+// heapBytes, base, pieces } with the library's result (its position, normal
+// and index arrays as typed arrays). A file over PIECES_ABOVE bytes is cut
+// into pieces of about PIECE_BUDGET bytes of geometry (step-pieces.js) when
+// its assembly allows, each piece read by a fresh reader, and the results
+// merged into the one a whole read gives; pieces: false reads it whole. A
+// smaller file whose whole read runs out of memory is read in pieces too.
+export async function readStepRaw(file, options = {}) {
+  const size = (file && (file.size !== undefined ? file.size : file.byteLength)) || 0;
+  const above = options.piecesAbove !== undefined ? options.piecesAbove : PIECES_ABOVE;
+  if (options.pieces === false) return readStepWhole(file, options);
+  if (size > above) return readStepInPieces(file, options);
+  try {
+    return await readStepWhole(file, options);
+  } catch (err) {
+    if (!(err instanceof StepImportError && err.kind === "memory")) throw err;
+    return readStepInPieces(file, { ...options, onlyIfCut: err });
+  }
+}
+
+// Files bigger than this are read in pieces. occt-import-js fills its 2 GB
+// heap at about 45 MB of STEP.
+export const PIECES_ABOVE = 32 * 1024 * 1024;
+// The geometry bytes a piece holds at most (a component bigger than that
+// gets a piece of its own).
+export const PIECE_BUDGET = 20 * 1024 * 1024;
+
+async function readStepInPieces(file, options) {
+  const { signal, onProgress } = options;
+  const name = options.name || (file && file.name) || "model.step";
+  const start = performance.now();
+  const progress = (phase, message, extra) => {
+    if (onProgress) onProgress(Object.assign({ phase, message, elapsedMs: performance.now() - start }, extra));
+  };
+  if (signal && signal.aborted) throw new DOMException("The import was canceled", "AbortError");
+
+  const worker = new Worker(new URL("./pieces-worker.js", import.meta.url), { type: "module" });
+  const replies = [];
+  let waiting = null, stopped = null;
+  const cutError = message => new StepImportError(`${name} could not be cut into pieces: ${message}`, { kind: "crash" });
+  const settle = msg => {
+    if (!waiting) return replies.push(msg);
+    const { resolve, reject } = waiting;
+    waiting = null;
+    if (msg.error) reject(msg.error);
+    else resolve(msg);
+  };
+  worker.onmessage = ev => settle(ev.data.type === "error" ? { error: cutError(ev.data.message) } : ev.data);
+  worker.onerror = ev => {
+    ev.preventDefault();
+    settle({ error: cutError(ev.message || "the worker failed") });
+  };
+  const onAbort = () => {
+    worker.terminate();
+    stopped = new DOMException("The import was canceled", "AbortError");
+    settle({ error: stopped });
+  };
+  if (signal) signal.addEventListener("abort", onAbort);
+  const ask = message => new Promise((resolve, reject) => {
+    if (stopped) return reject(stopped);
+    waiting = { resolve, reject };
+    if (replies.length) settle(replies.shift());
+    worker.postMessage(message);
+  });
+
+  // A piece that runs out of memory (a browser that allows less than 2 GB)
+  // has the file cut again, twice as fine.
+  const budgets = [1, 0.5, 0.25].map(f => f * (options.pieceBudget || PIECE_BUDGET));
+  try {
+    progress("split", `Cutting ${name} into pieces…`);
+    const tSplit = performance.now();
+    let plan = await ask({ type: "split", file, budget: budgets[0] });
+    if (plan.type === "whole") {
+      // Nothing to cut: read it whole, unless that has just run out of memory.
+      if (options.onlyIfCut) throw options.onlyIfCut;
+      worker.terminate();
+      return await readStepWhole(file, options);
+    }
+    const timings = { splitMs: performance.now() - tSplit, loadMs: 0, fileMs: 0, readMs: 0, convertMs: 0 };
+    for (let attempt = 0; ; attempt++) {
+      const count = plan.pieces.length;
+      const results = [];
+      let heapBytes = 0, base = null, failed = null;
+      for (let k = 0; k < count && !failed; k++) {
+        const piece = await ask({ type: "piece", k });
+        const label = `piece ${k + 1} of ${count}`;
+        try {
+          const raw = await readStepWhole(piece.blob, {
+            ...options,
+            name: `${name} (${label})`,
+            onProgress: p => {
+              if (p.phase === "start") return;
+              const message = p.phase === "read" ? `Reading ${name}, ${label} (${formatMB(piece.bytes)})…`
+                : p.phase === "load" ? `Loading the STEP reader for ${label}…`
+                : p.phase === "convert" ? `Receiving the meshes of ${label}…` : p.message;
+              progress(p.phase, message, { piece: k, pieces: count });
+            },
+          });
+          results.push(raw.result);
+          for (const key of ["loadMs", "fileMs", "readMs", "convertMs"]) timings[key] += raw.timings[key] || 0;
+          heapBytes = Math.max(heapBytes, raw.heapBytes || 0);
+          base = base || raw.base;
+        } catch (err) {
+          if (!(err instanceof StepImportError && err.kind === "memory")) throw err;
+          failed = { err, piece: plan.pieces[k] };
+        }
+      }
+      if (!failed) {
+        let result;
+        try {
+          result = mergePieceResults(results);
+        } catch (err) {
+          throw new StepImportError(`The pieces of ${name} did not fit back together (${err.message}); split the file into smaller STEP files.`, { kind: "crash" });
+        }
+        return { result, timings, heapBytes, base, pieces: count };
+      }
+      if (failed.piece.items === 1 || attempt + 1 >= budgets.length) {
+        throw new StepImportError(pieceMemoryMessage(name, failed.piece), failed.err);
+      }
+      progress("split", `Out of memory in a piece of ${name}; cutting it finer…`);
+      plan = await ask({ type: "plan", budget: budgets[attempt + 1] });
+    }
+  } finally {
+    worker.terminate();
+    if (signal) signal.removeEventListener("abort", onAbort);
+  }
+}
+
+function pieceMemoryMessage(name, piece) {
+  const names = piece.names.filter(Boolean);
+  const product = names.length ? ` of “${names[0]}”` : "";
+  if (piece.items === 1) {
+    return `Out of memory while reading ${name}: one body${product} alone fills the 2 GB the STEP reader can use. ` +
+      "Convert the file on a computer with 3dstep, or split that body in your CAD tool.";
+  }
+  return `Out of memory while reading ${name}, even in small pieces: the STEP reader can use at most 2 GB. ` +
+    "Try the coarse quality, or split the assembly into smaller STEP files.";
+}
+
+// Run occt-import-js on a STEP file in a fresh worker.
+function readStepWhole(file, { baseUrls = [VENDOR_BASE], quality, deflection, angle, signal, onProgress, name } = {}) {
   name = name || (file && file.name) || "model.step";
   const size = file && (file.size !== undefined ? file.size : file.byteLength) || 0;
   const params = occtParams({ quality, deflection, angle });
