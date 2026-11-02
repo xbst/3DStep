@@ -913,9 +913,10 @@ export class ProjectState {
   // [[part]] tables go; the id lists name the kept part in their place, once
   // (a group that kept other parts stays, and the kept part is added where a
   // list no longer reaches it); a move keeps it in the first move that
-  // reaches it; arrows and labels attach to it; and every step shows it where
-  // it showed any of the merged parts. The selection becomes `select`, else
-  // the old one mapped the same way.
+  // reaches it (a later move's group that also holds other parts is split
+  // into its other children, which stay moved); arrows and labels attach to
+  // it; and every step shows it where it showed any of the merged parts. The
+  // selection becomes `select`, else the old one mapped the same way.
   _commitMerge(origin, name, model, merged, kept, select = null) {
     const after = new Set(nodeIds(merged));
     const under = new Set(nodeIds(model).filter(x => !after.has(x)));
@@ -945,7 +946,7 @@ export class ProjectState {
       for (const m of step.moves) {
         m.parts = swap(m.parts);
         if (expandIds(reg, m.parts).includes(kept)) {
-          if (seen) m.parts = m.parts.filter(x => !membersOf(reg, x).includes(kept));
+          if (seen) m.parts = removeFromIds(reg, m.parts, new Set([kept]));
           seen = true;
         }
       }
