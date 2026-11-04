@@ -2859,11 +2859,24 @@
       updateAutoArrows();
       requestRender();
     }
+    // The cameras' up is the scene's axis. The designer changes it (its first
+    // model sets the project's), and OrbitControls keeps the rotation from the
+    // up it was made with, so that rotation follows too.
+    function applyUp() {
+      var up = upDir();
+      cameraP.up.set(up[0], up[1], up[2]);
+      cameraO.up.set(up[0], up[1], up[2]);
+      if (controls._quat && controls._quatInverse) {
+        controls._quat.setFromUnitVectors(cameraP.up, new THREE.Vector3(0, 1, 0));
+        controls._quatInverse.copy(controls._quat).invert();
+      }
+    }
     function setScene(newScene, opts) {
       opts = opts || {};
       var keepCamera = opts.keepCamera !== false;
       var camBefore = webgl ? getCamera() : null;
       scene = newScene || { steps: [] };
+      if (webgl) applyUp();
       refold();
       renderPanelStatic();
       var i = clamp(current < 0 ? 0 : current, 0, Math.max(0, states.length - 1));
