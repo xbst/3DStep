@@ -9,9 +9,18 @@
 // mid-drag puts the parts back. A drag moves in steps of 1 mm and turns in
 // steps of 15 degrees; holding Alt (Option) drags freely. A readout follows
 // the pointer.
+//
+// With an explicit arrow of the step selected, the gizmo sits on the arrow
+// instead (placement.arrowPivot: a straight arrow's midpoint, a rotate
+// arrow's center) and a drag moves or turns both of its points; the viewer
+// previews it (editor.previewArrow) and release commits one
+// state.updateArrow with the points back in the arrow's attach frame. Under
+// Move, a straight arrow also gets the length handle on its tail
+// (arrow-length.js).
 
 import { DEG, composePlacement, isIdentityQuat, isZero, quatAxisAngle, roundTo, snapQuat, snapVector, vdot, vsub } from "./geometry.js";
-import { mergeEntries, pivotOf, unitsFor } from "./placement.js";
+import { arrowPivot, attachPlacement, mergeEntries, moveArrow, pivotOf, unitsFor } from "./placement.js";
+import { ArrowLength } from "./arrow-length.js";
 
 export const SNAP_MM = 1;
 export const SNAP_DEG = 15;
@@ -37,6 +46,7 @@ export class GizmoTools {
     this.pivot = null;       // the Object3D it drives
     this.mode = null;        // "translate" | "rotate" while a tool is active
     this.units = [];
+    this.arrow = null;       // the selected arrow the gizmo is on: {index, item, pl}
     this.P = null;           // the pivot's start position for the drag in progress
     this.dragging = false;
     this.free = false;       // Alt is down: no snapping
@@ -46,7 +56,7 @@ export class GizmoTools {
     viewport.on("ready", () => this._rebuild());
     viewport.on("camera", () => { if (this.tc && this.vp.viewer && this.vp.viewer.editor) this.tc.camera = this.vp.viewer.editor.camera(); });
     for (const ev of ["selection-changed", "project-changed", "step-changed", "models-changed"]) {
-      this.state.on(ev, () => { if (this.mode && !this.dragging) this._attach(); });
+      this.state.on(ev, () => { if (this.mode && !this.dragging && !this.length.dragging) this._attach(); });
     }
     // Alt alone would also move the focus to the browser's menu (Windows)
     // when it comes back up: not while Move or Rotate is the tool, outside
@@ -64,7 +74,7 @@ export class GizmoTools {
     // (main.js's and the viewer's own) before anything else sees them. Escape
     // and the tool keys still end the drag, and a focused field keeps its keys.
     window.addEventListener("keydown", (e) => {
-      if (!this.dragging || !holdsBack(e)) return;
+      if (!(this.dragging || this.length.dragging) || !holdsBack(e)) return;
       e.stopPropagation();
       e.preventDefault();
     }, true);
@@ -76,6 +86,7 @@ export class GizmoTools {
       this.pointer = { x: e.clientX, y: e.clientY };
       if (e.altKey !== this.free) this._setFree(e.altKey);
     }, { passive: true, capture: true });
+    this.length = new ArrowLength(this, SNAP_MM);
   }
 
   // The tool object for registerTool: mode "translate" (Move) or "rotate".
@@ -87,6 +98,7 @@ export class GizmoTools {
       onPick: () => !!(this.tc && (this.tc.dragging || this.tc.axis)),
       // Escape mid-drag puts the parts back and keeps the tool; else it leaves.
       cancel: () => {
+        if (this.length.cancel()) return true;
         if (!this._abortDrag()) return false;
         this._attach();
         return true;
@@ -121,6 +133,7 @@ export class GizmoTools {
 
   // The viewer was recreated (a theme change): start over with its new canvas.
   _rebuild() {
+    this.length.reset();
     if (this.tc) {
       this._abortDrag();
       try { this.tc.detach(); this.tc.dispose(); } catch (e) { /* ignore */ }
@@ -137,17 +150,21 @@ export class GizmoTools {
     if (this.dragging) this._onDrag();
   }
 
-  // Put the gizmo on the current selection (or hide it).
+  // Put the gizmo on the current selection, parts or an arrow (or hide it).
   _attach() {
     if (!this._ensure()) return;
-    const ids = this.state.selection.parts;
-    this.units = ids.length && this.state.currentStep >= 0 ? unitsFor(this.state, ids) : [];
-    if (!this.units.length) {
+    const sel = this.state.selection;
+    const step = this.state.step();
+    const item = step && sel.arrow >= 0 ? step.arrows[sel.arrow] : null;
+    this.arrow = item ? { index: sel.arrow, item, pl: attachPlacement(this.state, item.attach) } : null;
+    const ids = sel.parts;
+    this.units = !item && ids.length && this.state.currentStep >= 0 ? unitsFor(this.state, ids) : [];
+    if (!this.arrow && !this.units.length) {
       this._detach();
       return;
     }
     const ed = this.vp.viewer.editor;
-    this.P = pivotOf(this.units);
+    this.P = this.arrow ? arrowPivot(this.arrow.item, this.arrow.pl) : pivotOf(this.units);
     this.pivot.position.set(this.P[0], this.P[1], this.P[2]);
     this.pivot.quaternion.set(0, 0, 0, 1);
     this.pivot.updateMatrixWorld(true);
@@ -155,10 +172,12 @@ export class GizmoTools {
     this.tc.setMode(this.mode);
     this.tc.enabled = true;
     this.tc.attach(this.pivot);
+    this.length.show(this.mode === "translate" ? this.arrow : null);
     ed.requestRender();
   }
 
   _detach() {
+    this.length.hide();
     if (!this.tc) return;
     this._abortDrag();
     this.tc.detach();
@@ -233,9 +252,16 @@ export class GizmoTools {
     this.vp.showReadout(this._readout(translate, rotate), this.pointer.x, this.pointer.y);
   }
 
-  // Show every unit moved by a delta about the pivot; returns the placements.
+  // Show every unit moved by a delta about the pivot; returns the placements
+  // (for an arrow: its points; no delta shows it where the scene has it).
   _preview(translate, rotate) {
     const delta = { pivot: this.P, translate, rotate };
+    if (this.arrow) {
+      const points = moveArrow(this.arrow.item, this.arrow.pl, delta);
+      const none = isZero(translate, 1e-9) && isIdentityQuat(rotate, 1e-9);
+      this.vp.viewer.editor.previewArrow(this.arrow.index, none ? null : points);
+      return points;
+    }
     const results = this.units.map((u) => ({ unit: u, next: composePlacement(u.current, delta, u.center) }));
     const viewer = this.vp.viewer;
     for (const r of results) viewer.previewPlacement(r.unit.id, { offset: r.next.offset, rotate: r.next.rotate });
@@ -245,6 +271,10 @@ export class GizmoTools {
   // Show the units of a dropped drag where the current step places them: the
   // scene may have been rebuilt meanwhile, then previewed with stale placements.
   _showCurrent() {
+    if (this.arrow) {
+      this.vp.viewer.editor.previewArrow(this.arrow.index, null);
+      return;
+    }
     const units = this.units.length && this.state.currentStep >= 0 ? unitsFor(this.state, this.units.map((u) => u.id)) : [];
     if (!units.length) return;
     this.units = units;
@@ -286,6 +316,12 @@ export class GizmoTools {
       this._attach();
       return;
     }
+    if (this.arrow) {
+      const round = (p) => p.map((v) => roundTo(v, 3));
+      const { from, to } = last.results;
+      if (!this.state.updateArrow(this.arrow.index, { from: round(from), to: round(to) }, "viewport")) this._attach();
+      return;
+    }
     const entries = mergeEntries(last.results.map((r) => ({
       ids: [r.unit.id],
       offset: r.next.offset.map((v) => roundTo(v, 4)),
@@ -294,16 +330,23 @@ export class GizmoTools {
     if (!this.state.setMoves(entries, "viewport")) this._attach();
   }
 
+  // The size of the gizmo at a point, in model units: it scales with the view
+  // as TransformControlsGizmo does, so it keeps its size on screen.
+  screenScale(point) {
+    if (!this.tc || !this.vp.viewer || !this.vp.viewer.editor) return null;
+    const cam = this.vp.viewer.editor.camera();
+    let factor;
+    if (cam.isOrthographicCamera) factor = (cam.top - cam.bottom) / cam.zoom;
+    else factor = Math.hypot(point[0] - cam.position.x, point[1] - cam.position.y, point[2] - cam.position.z) * Math.min(1.9 * Math.tan(Math.PI * cam.fov / 360) / cam.zoom, 7);
+    return factor * this.tc.size / 4;
+  }
+
   // For the browser tests: the client coordinates of a translate handle's
-  // grab point (the gizmo scales with the view as TransformControlsGizmo does).
+  // grab point.
   handleScreen(axis = "X") {
     if (!this.tc || !this.P || !this.vp.viewer || !this.vp.viewer.editor) return null;
     const ed = this.vp.viewer.editor;
-    const cam = ed.camera();
-    let factor;
-    if (cam.isOrthographicCamera) factor = (cam.top - cam.bottom) / cam.zoom;
-    else factor = Math.hypot(this.P[0] - cam.position.x, this.P[1] - cam.position.y, this.P[2] - cam.position.z) * Math.min(1.9 * Math.tan(Math.PI * cam.fov / 360) / cam.zoom, 7);
-    const s = factor * this.tc.size / 4;
+    const s = this.screenScale(this.P);
     const dir = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }[axis] || [1, 0, 0];
     const point = this.P.map((v, k) => v + dir[k] * 0.45 * s);
     const out = ed.project(point);

@@ -12,7 +12,7 @@
 import { ARROW_KINDS, LABEL_SIDES, expandIds, membersOf } from "./project-model.js";
 import { esc } from "./dialogs.js";
 import { convertAttached, roundTo } from "./tools/geometry.js";
-import { attachPlacement } from "./tools/placement.js";
+import { arrowLength, attachPlacement, withLength } from "./tools/placement.js";
 
 const fmt = (v) => (Number.isFinite(v) ? String(Number(v.toFixed(4))) : "");
 const AXES = ["x", "y", "z"];
@@ -309,6 +309,7 @@ export class InspectorPanel {
       ARROW_KINDS.map((k) => `<option value="${k}">${k === "rotate" ? "Rotate (around an axis)" : "Straight"}</option>`).join("") + `</select></div>` +
       `<div class="insp-row vec-row"><span class="insp-label">${rotate ? "Center" : "From"}</span>${vecInputs("insp-from", "From")}${this._pickButton("from")}</div>` +
       `<div class="insp-row vec-row"><span class="insp-label">${rotate ? "Axis to" : "To"}</span>${vecInputs("insp-to", "To")}${this._pickButton("to")}</div>` +
+      (rotate ? "" : `<div class="insp-row"><label for="insp-alength">Length mm</label><input id="insp-alength" class="field-input" type="number" step="1" min="0.001" title="The head stays where it is; the tail moves along the arrow (with the Move tool, also by dragging the dot on its tail)"></div>`) +
       (rotate ? `<div class="insp-row"><label for="insp-turns">Turns</label><input id="insp-turns" class="field-input" type="number" step="0.05" title="A fraction of a turn; negative turns counterclockwise seen from the center toward the axis point"></div>` +
         `<div class="insp-row"><label for="insp-radius">Radius mm</label><input id="insp-radius" class="field-input" type="number" step="0.5" min="0.1"></div>` : "") +
       `<div class="insp-row"><label for="insp-acolor">Color</label><input id="insp-acolor" class="field-input" placeholder="the theme's arrow color" autocomplete="off" spellcheck="false"></div>` +
@@ -324,6 +325,7 @@ export class InspectorPanel {
     this._set("insp-kind", a.kind);
     this._setVec("insp-from", a.from);
     this._setVec("insp-to", a.to);
+    this._set("insp-alength", fmt(roundTo(arrowLength(a), 3)));
     this._set("insp-turns", fmt(a.turns));
     this._set("insp-radius", fmt(a.radius));
     this._set("insp-acolor", a.color);
@@ -435,6 +437,11 @@ export class InspectorPanel {
         case "insp-gh": ok = st.setGhost(m.ids, t.checked); break;
         case "insp-arrow": ok = st.setMove(m.ids, { arrow: t.checked }); break;
         case "insp-kind": ok = st.updateArrow(m.index, { kind: t.value }); break;
+        case "insp-alength": {
+          const next = withLength(m.item, Number(t.value));
+          ok = next ? st.updateArrow(m.index, { from: round3(next.from) }) : false;
+          break;
+        }
         case "insp-turns": ok = Number(t.value) ? st.updateArrow(m.index, { turns: Number(t.value) }) : false; break;
         case "insp-radius": ok = Number(t.value) > 0 ? st.updateArrow(m.index, { radius: Number(t.value) }) : false; break;
         case "insp-acolor": ok = st.updateArrow(m.index, { color: t.value.trim() }); break;

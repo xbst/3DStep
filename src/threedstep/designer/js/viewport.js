@@ -112,8 +112,8 @@ export class Viewport {
   // a theme change: they listen to "ready").
   _buildTools() {
     this.gizmo = new GizmoTools(this);
-    this.registerTool("move", this.gizmo.tool("translate"), { label: "Move", title: "Move the selection (G): drag the gizmo's arrows or planes; it moves in 1 mm steps, hold Alt to move freely", icon: ICONS.move });
-    this.registerTool("rotate", this.gizmo.tool("rotate"), { label: "Rotate", title: "Rotate the selection about its center (R): drag the gizmo's rings; it turns in 15° steps, hold Alt to turn freely", icon: ICONS.rotate });
+    this.registerTool("move", this.gizmo.tool("translate"), { label: "Move", title: "Move the selection, parts or an arrow (G): drag the gizmo's arrows or planes, or a straight arrow's tail dot to change its length; it moves in 1 mm steps, hold Alt to move freely", icon: ICONS.move });
+    this.registerTool("rotate", this.gizmo.tool("rotate"), { label: "Rotate", title: "Rotate the selection, parts or an arrow, about its center (R): drag the gizmo's rings; it turns in 15° steps, hold Alt to turn freely", icon: ICONS.rotate });
     this.explode = new ExplodeTools(this);
     this.annotate = new AnnotateTools(this);
     this.cameraTools = new CameraTools(this);
