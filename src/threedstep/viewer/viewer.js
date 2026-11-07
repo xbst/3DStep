@@ -2859,6 +2859,31 @@
       updateAutoArrows();
       requestRender();
     }
+    // Editor: show the step's explicit arrow `index` at other points
+    // ({from, to} in its attach frame) while a gizmo drags it, its tail label
+    // too; null shows it where the scene puts it again.
+    function previewArrow(index, points) {
+      var at = -1;
+      arrows.forEach(function (r, k) { if (r.index === index) at = k; });
+      if (at < 0) return;
+      var rec = arrows[at];
+      var spec = points ? Object.assign({}, rec.spec, { from: points.from, to: points.to }) : rec.spec;
+      if (rec.kind === "straight") {
+        rec.set(spec.from, spec.to);
+      } else {
+        var parent = rec.group.parent;
+        rec.dispose();
+        var next = makeRotateArrow(spec, rec.selected);
+        next.group.traverse(function (o) { o.layers.set(0); });
+        if (parent) parent.add(next.group);
+        next.spec = rec.spec;
+        next.index = rec.index;
+        arrows[at] = next;
+      }
+      labels.forEach(function (l) { if (l.spec.tail && l.spec.index === index) l.spec.at = spec.from.slice(); });
+      updateLabels();
+      requestRender();
+    }
     // The cameras' up is the scene's axis. The designer changes it (its first
     // model sets the project's), and OrbitControls keeps the rotation from the
     // up it was made with, so that rotation follows too.
@@ -3002,7 +3027,8 @@
         canvas: canvas,
         requestRender: requestRender,
         setAnnotationSelection: setAnnotationSelection,
-        setHover: setHover,                                  // the part a tool's click would hit (id or null)
+        previewArrow: previewArrow,                          // an explicit arrow at dragged points ({from, to} or null)
+        setHover: setHover,                                 // the part a tool's click would hit (id or null)
         getHover: function () { return hovered; },
         // A world point to client coordinates: {x, y, visible}.
         project: function (p) {
